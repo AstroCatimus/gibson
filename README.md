@@ -46,7 +46,14 @@ npm install
 cd ..
 ```
 
-### 5. Run it — open two terminals
+### 5. Run it
+```bash
+./start.sh
+```
+This opens two Terminal windows automatically — one for the backend, one for Expo.
+Scan the QR code with Expo Go on your phone.
+
+Or manually if preferred:
 
 **Terminal 1 — backend:**
 ```bash
@@ -59,7 +66,6 @@ uvicorn api.main:app --reload --port 8000
 cd mobile
 npx expo start
 ```
-Scan the QR code with Expo Go on your phone.
 
 ### Staying in sync
 Pull changes from the other person before you start working:
