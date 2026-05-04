@@ -92,12 +92,10 @@ The backend auto-reloads when you pull new code (`--reload` flag handles it).
 - Multiple copies of the same book handled correctly
 - New store setup + invite-based onboarding
 
-**Works but still being tested:**
-- Import Amazon / Ka-Zam inventory files (background job, progress bar)
-- Pricing via BookFinder + Vialibri (live scraping — can be slow or inconsistent)
+**In progress (not working yet):**
+- Import Amazon / Ka-Zam inventory files
+- Pricing via BookFinder + Vialibri
 - Defrag / inventory management tools
-
-**In progress:**
 - POS / sale flow
 - Research tab
 - Ghost Book (overnight research for unidentified books)
