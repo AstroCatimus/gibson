@@ -82,14 +82,20 @@ The backend auto-reloads when you pull new code (`--reload` flag handles it).
 
 ## Status
 
+> **This is a test system running locally on Mac.** Nothing is hosted — both people run the backend on their own machine. The database (Supabase) is shared but everything else is local. Expect rough edges.
+
 **Works:**
 - Scan a barcode → identifies book, shows price
 - Take a cover photo → identifies book, shows price
 - Confirm → adds to inventory with SKU
-- Import Amazon / Ka-Zam inventory files
 - Browse and search inventory
 - Multiple copies of the same book handled correctly
 - New store setup + invite-based onboarding
+
+**Works but still being tested:**
+- Import Amazon / Ka-Zam inventory files (background job, progress bar)
+- Pricing via BookFinder + Vialibri (live scraping — can be slow or inconsistent)
+- Defrag / inventory management tools
 
 **In progress:**
 - POS / sale flow
