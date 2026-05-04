@@ -1,0 +1,40 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+
+# Environment
+.env
+.env.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Data
+*.sqlite3
+/data/
+/training/datasets/**/*.jsonl
+!/training/datasets/**/.gitkeep
+
+# Node / Expo
+node_modules/
+mobile/dist/
+mobile/.expo/
+mobile/android/
+mobile/ios/
+.expo/
+
+# Test
+.coverage
+htmlcov/
+.pytest_cache/

@@ -1,0 +1,43 @@
+{
+  "expo": {
+    "name": "Gibson",
+    "slug": "gibson",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "dark",
+    "backgroundColor": "#0f0f1a",
+    "splash": {
+      "backgroundColor": "#0f0f1a"
+    },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.alexandriabookcoop.gibson",
+      "infoPlist": {
+        "NSCameraUsageDescription": "Gibson uses the camera to identify books.",
+        "NSMicrophoneUsageDescription": "Gibson uses the microphone for ambient voice mode."
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#0f0f1a"
+      },
+      "package": "com.alexandriabookcoop.gibson",
+      "permissions": [
+        "CAMERA",
+        "RECORD_AUDIO"
+      ]
+    },
+    "plugins": [
+      "expo-router",
+      "expo-camera",
+      "expo-font"
+    ],
+    "scheme": "gibson",
+    "extra": {
+      "apiBaseUrl": "http://localhost:8000"
+    }
+  }
+}

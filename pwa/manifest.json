@@ -1,0 +1,23 @@
+{
+  "name": "Gibson — Alexandria Book Co-op",
+  "short_name": "Gibson",
+  "description": "Bibliographic intelligence for used bookstores",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#1a1a2e",
+  "theme_color": "#e94560",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "/static/assets/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/static/assets/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ],
+  "categories": ["books", "business", "productivity"]
+}

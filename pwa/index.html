@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <meta name="theme-color" content="#e94560">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <title>Gibson — Alexandria Book Co-op</title>
+  <link rel="manifest" href="/manifest.json">
+  <style>
+    /* ═══ Gibson Design System ═══ */
+    :root {
+      --bg-primary: #0f0f1a;
+      --bg-secondary: #1a1a2e;
+      --bg-card: #16213e;
+      --accent: #e94560;
+      --accent-dim: #c73e54;
+      --text-primary: #eee;
+      --text-secondary: #aaa;
+      --text-muted: #666;
+      --green: #4ade80;
+      --yellow: #fbbf24;
+      --red: #ef4444;
+      --grey: #6b7280;
+      --border: #2a2a4a;
+      --radius: 8px;
+      --font: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+      --mono: 'SF Mono', 'Fira Code', monospace;
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: var(--font);
+      background: var(--bg-primary);
+      color: var(--text-primary);
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+    /* ═══ Layout ═══ */
+    #app { display: flex; flex-direction: column; min-height: 100vh; }
+    #header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 12px 16px; background: var(--bg-secondary);
+      border-bottom: 1px solid var(--border); position: sticky; top: 0; z-index: 100;
+    }
+    #header h1 { font-size: 18px; font-weight: 700; color: var(--accent); }
+    #header .store-badge {
+      font-size: 11px; padding: 2px 8px; border-radius: 4px;
+      background: var(--accent-dim); color: white;
+    }
+    #main { flex: 1; padding: 16px; max-width: 800px; margin: 0 auto; width: 100%; }
+    #nav {
+      display: flex; justify-content: space-around; padding: 8px 0;
+      background: var(--bg-secondary); border-top: 1px solid var(--border);
+      position: sticky; bottom: 0;
+    }
+    .nav-btn {
+      display: flex; flex-direction: column; align-items: center; gap: 2px;
+      background: none; border: none; color: var(--text-secondary);
+      font-size: 10px; padding: 6px 12px; cursor: pointer;
+    }
+    .nav-btn.active { color: var(--accent); }
+    .nav-btn svg { width: 22px; height: 22px; }
+    /* ═══ Components ═══ */
+    .card {
+      background: var(--bg-card); border-radius: var(--radius);
+      border: 1px solid var(--border); padding: 16px; margin-bottom: 12px;
+    }
+    .btn {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 10px 20px; border-radius: var(--radius);
+      border: none; cursor: pointer; font-weight: 600; font-size: 14px;
+      transition: opacity 0.15s;
+    }
+    .btn:active { opacity: 0.8; }
+    .btn-primary { background: var(--accent); color: white; }
+    .btn-secondary { background: var(--border); color: var(--text-primary); }
+    .btn-full { width: 100%; justify-content: center; }
+    .confidence {
+      display: inline-block; padding: 2px 6px; border-radius: 4px;
+      font-size: 11px; font-weight: 600; font-family: var(--mono);
+    }
+    .confidence-high { background: #065f46; color: var(--green); }
+    .confidence-med { background: #78350f; color: var(--yellow); }
+    .confidence-low { background: #7f1d1d; color: var(--red); }
+    .price-tag {
+      font-size: 20px; font-weight: 700; color: var(--green);
+      font-family: var(--mono);
+    }
+    .price-label {
+      font-size: 10px; text-transform: uppercase; letter-spacing: 1px;
+      color: var(--text-muted);
+    }
+    .section-tag {
+      display: inline-block; padding: 4px 10px; border-radius: 4px;
+      background: var(--bg-secondary); color: var(--text-secondary);
+      font-size: 12px; cursor: pointer;
+    }
+    .section-tag:hover { background: var(--accent-dim); color: white; }
+    /* ═══ Mic Button (Ambient Mode) ═══ */
+    #mic-btn {
+      position: fixed; top: 12px; right: 60px; z-index: 200;
+      width: 36px; height: 36px; border-radius: 50%;
+      background: var(--bg-card); border: 1px solid var(--border);
+      color: var(--text-secondary); cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+    }
+    #mic-btn.recording { background: var(--accent); color: white; animation: pulse 1s infinite; }
+    @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.6; } }
+    /* ═══ Camera ═══ */
+    #camera-container {
+      position: relative; width: 100%; aspect-ratio: 3/4;
+      background: #000; border-radius: var(--radius); overflow: hidden;
+    }
+    #camera-container video { width: 100%; height: 100%; object-fit: cover; }
+    .barcode-flash {
+      position: absolute; inset: 0; background: rgba(74, 222, 128, 0.3);
+      pointer-events: none; animation: flash 0.5s ease-out;
+    }
+    @keyframes flash { from { opacity: 1; } to { opacity: 0; } }
+    /* ═══ Loading ═══ */
+    .spinner {
+      width: 24px; height: 24px; border: 2px solid var(--border);
+      border-top-color: var(--accent); border-radius: 50%;
+      animation: spin 0.6s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    /* ═══ Responsive ═══ */
+    @media (min-width: 768px) {
+      #main { padding: 24px; }
+      .card { padding: 20px; }
+    }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <header id="header">
+      <h1>Gibson</h1>
+      <button id="mic-btn" title="Ask Gibson">🎤</button>
+      <span class="store-badge" id="store-badge">DL</span>
+    </header>
+
+    <main id="main">
+      <!-- Views rendered here by router -->
+      <div id="view-container"></div>
+    </main>
+
+    <nav id="nav">
+      <button class="nav-btn active" data-view="camera" title="Scan">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="5" width="20" height="14" rx="2"/><circle cx="12" cy="12" r="3"/></svg>
+        <span>Scan</span>
+      </button>
+      <button class="nav-btn" data-view="inventory" title="Inventory">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 016.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/></svg>
+        <span>Books</span>
+      </button>
+      <button class="nav-btn" data-view="pos" title="POS">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="1" y="4" width="22" height="16" rx="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg>
+        <span>Sale</span>
+      </button>
+      <button class="nav-btn" data-view="research" title="Research">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        <span>Research</span>
+      </button>
+      <button class="nav-btn" data-view="dashboard" title="Dashboard">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+        <span>Dash</span>
+      </button>
+    </nav>
+  </div>
+
+  <!-- Core Libraries -->
+  <script src="/static/src/lib/store.js"></script>
+  <script src="/static/src/lib/api.js"></script>
+  <script src="/static/src/lib/router.js"></script>
+  <script src="/static/src/lib/voice.js"></script>
+
+  <!-- Views -->
+  <script src="/static/src/views/camera.js"></script>
+  <script src="/static/src/views/identify.js"></script>
+  <script src="/static/src/views/pricing.js"></script>
+  <script src="/static/src/views/condition.js"></script>
+  <script src="/static/src/views/catalogue.js"></script>
+  <script src="/static/src/views/inventory.js"></script>
+  <script src="/static/src/views/pos.js"></script>
+  <script src="/static/src/views/shelfie.js"></script>
+  <script src="/static/src/views/research.js"></script>
+
+  <!-- Init -->
+  <script>
+    // Register service worker
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('/service-worker.js');
+    }
+    // Boot the app
+    Gibson.router.init();
+    Gibson.voice.init();
+  </script>
+</body>
+</html>
