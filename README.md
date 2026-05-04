@@ -80,6 +80,33 @@ git push
 ```
 The backend auto-reloads when you pull new code (`--reload` flag handles it).
 
+## What Works Right Now
+
+**✅ Fully working:**
+- Barcode scanning → instant identification via local DB + Open Library
+- Cover photo identification (Claude Vision + OCR)
+- Pricing (BooksRun, BookFinder, Vialibri)
+- Confirm book → creates Work/Edition/Stock Item with SKU
+- Inventory tab — browse, search, filter by section
+- Defrag tab — export inventory, import Amazon TSV + Ka-Zam TSV (background job with progress bar)
+- Multi-copy picker — if you scan a book with 2+ copies in stock, shows a picker
+- Onboarding — create a new store or join an existing one with an invite code
+- Login / signup
+
+**🚧 Built but not wired up yet:**
+- POS / sale flow (router exists, mobile tab exists, not connected end to end)
+- Research tab (skeleton only)
+- Ghost Book pipeline (overnight research agent — logic written, not triggered from mobile)
+
+**📋 Planned, not started:**
+- Shelfie / shelf scan (YOLO spine detection)
+- Whatnot show mode
+- Conversation / ambient voice mode
+- Local LLM (Ollama) — cloud Anthropic API only for now
+- Cloudflare R2 image storage — photos currently stored as base64
+- eBay, BooksCouter pricing — need API keys
+- Biblio, Amazon SP listing channels
+
 ## Architecture
 
 ```
