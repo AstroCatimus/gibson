@@ -18,9 +18,11 @@ catalogues them into a cooperative database, and lists them for sale.
 git clone https://github.com/AstroCatimus/gibson.git
 cd gibson
 ```
+Everything below runs from inside the `gibson` folder unless noted.
 
 ### 2. Python environment
 ```bash
+# Run from: /gibson
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
@@ -28,6 +30,7 @@ pip install -r requirements.txt
 
 ### 3. Environment files
 ```bash
+# Run from: /gibson
 cp .env.example .env
 cp mobile/.env.example mobile/.env
 ```
@@ -41,27 +44,29 @@ EXPO_PUBLIC_API_BASE_URL=http://[YOUR_IP]:8000
 
 ### 4. Mobile dependencies
 ```bash
+# Run from: /gibson
 cd mobile
 npm install
 cd ..
 ```
 
 ### 5. Run it
+Make sure you're in the root `gibson` folder, then:
 ```bash
 ./start.sh
 ```
 This opens two Terminal windows automatically — one for the backend, one for Expo.
 Scan the QR code with Expo Go on your phone.
 
-Or manually if preferred:
+Or manually if preferred — open two separate Terminal windows, both starting from the `gibson` root folder:
 
-**Terminal 1 — backend:**
+**Terminal 1 — backend (run from `/gibson`):**
 ```bash
 source .venv/bin/activate
 uvicorn api.main:app --reload --port 8000
 ```
 
-**Terminal 2 — mobile:**
+**Terminal 2 — mobile (run from `/gibson`):**
 ```bash
 cd mobile
 npx expo start
