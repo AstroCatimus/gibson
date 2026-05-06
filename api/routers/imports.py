@@ -178,7 +178,7 @@ async def _upsert(parsed: dict, store_id: str, store_prefix: str,
     # Idempotency — skip if already imported
     if ext_id:
         exists = await fetchrow(
-            "SELECT source_id FROM gibson_source_record WHERE external_id = $1 AND source_type = $2",
+            "SELECT source_record_id FROM gibson_source_record WHERE external_id = $1 AND source = $2",
             ext_id, parsed["source"],
         )
         if exists:
@@ -278,7 +278,7 @@ async def _upsert(parsed: dict, store_id: str, store_prefix: str,
     await execute(
         """
         INSERT INTO gibson_source_record
-            (source_type, external_id, isbn_norm, raw_data, stock_item_id)
+            (source, external_id, isbn_norm, raw_data, stock_item_id)
         VALUES ($1, $2, $3, $4::jsonb, $5)
         """,
         parsed["source"],

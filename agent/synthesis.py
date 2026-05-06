@@ -12,7 +12,7 @@ from typing import Any
 
 import anthropic
 
-from api.config import get_settings
+from api.config import settings
 
 logger = logging.getLogger("gibson.synthesis")
 
@@ -68,7 +68,6 @@ async def synthesize(source_results: dict[str, list[dict]], original_query: dict
     Returns:
         Synthesized record with per-field confidence scores.
     """
-    settings = get_settings()
     client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
 
     # Flatten results for the prompt
@@ -88,7 +87,7 @@ Synthesize into a single authoritative record."""
 
     try:
         response = await client.messages.create(
-            model="claude-haiku-4-5-20251001",
+            model=settings.anthropic_synthesis_model,
             max_tokens=2000,
             system=SYNTHESIS_SYSTEM_PROMPT,
             messages=[{"role": "user", "content": user_message}]

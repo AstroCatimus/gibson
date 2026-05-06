@@ -17,7 +17,6 @@ import hashlib
 import logging
 from typing import Any
 
-from api.config import get_settings
 from api.database import fetch, fetchrow, execute, get_pool
 from agent.runner import load_cascade, resolve_source_list, run_phase
 from agent.synthesis import synthesize
@@ -35,7 +34,6 @@ async def process_ghost_book_queue(pool):
     """
     cascade = load_cascade()
     items = await fetch(
-        pool,
         """SELECT gbr.ghost_book_id, gbr.physical_description, gbr.ocr_text_raw,
                   gbr.cover_photo_url, gbr.research_status, gbr.estimated_year,
                   gbr.estimated_language, gbr.source_record
@@ -53,7 +51,6 @@ async def process_ghost_book_queue(pool):
         except Exception as e:
             logger.error("Ghost Book %s failed: %s", item["ghost_book_id"], str(e))
             await execute(
-                pool,
                 """UPDATE gibson_ghost_book_record
                    SET research_status = 'ERROR', updated_at = NOW()
                    WHERE ghost_book_id = $1""",
@@ -76,7 +73,6 @@ async def process_single_ghost(item: dict, cascade: dict, pool):
     logger.info("Processing Ghost Book %s", ghost_id)
 
     await execute(
-        pool,
         "UPDATE gibson_ghost_book_record SET research_status = 'RESEARCHING', updated_at = NOW() WHERE ghost_book_id = $1",
         ghost_id
     )
@@ -115,7 +111,6 @@ async def process_single_ghost(item: dict, cascade: dict, pool):
     for source_result in phase_3_results:
         if source_result.get("results"):
             await execute(
-                pool,
                 """INSERT INTO gibson_ghost_book_source_hit
                    (ghost_book_id, source_name, hit_type, raw_response, match_confidence)
                    VALUES ($1, $2, $3, $4::jsonb, $5)""",
@@ -133,7 +128,6 @@ async def process_single_ghost(item: dict, cascade: dict, pool):
     new_status = "RESOLVED" if synthesis_result.get("overall_confidence", 0) > 0.6 else "UNRESOLVED"
 
     await execute(
-        pool,
         """UPDATE gibson_ghost_book_record
            SET research_status = $2,
                usbn = $3,
@@ -185,7 +179,7 @@ def _best_source_confidence(source_result: dict) -> float:
 async def main():
     """Run the Ghost Book agent."""
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
-    pool = await get_pool()
+    pool = get_pool()
     try:
         await process_ghost_book_queue(pool)
     finally:

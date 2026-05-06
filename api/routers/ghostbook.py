@@ -23,7 +23,8 @@ async def ghost_book_queue(
     """Ghost Book records awaiting research or review."""
     rows = await fetch(
         """
-        SELECT gb.ghost_id, gb.collection_name, gb.physical_description,
+        SELECT gb.ghost_book_id, gb.collection_name, gb.physical_description,
+               gb.ocr_text_raw, gb.cover_photo_url,
                gb.date_range, gb.research_status, gb.sources_searched,
                gb.confidence_map, gb.created_at,
                si.gibson_sku, si.images, si.store_id
@@ -39,25 +40,25 @@ async def ghost_book_queue(
     return [dict(r) for r in rows]
 
 
-@router.get("/{ghost_id}")
-async def get_ghost_book(ghost_id: UUID):
+@router.get("/{ghost_book_id}")
+async def get_ghost_book(ghost_book_id: UUID):
     """Get a Ghost Book record with all source hits."""
     record = await fetchrow(
-        "SELECT * FROM gibson_ghost_book_record WHERE ghost_id = $1",
-        str(ghost_id),
+        "SELECT * FROM gibson_ghost_book_record WHERE ghost_book_id = $1",
+        str(ghost_book_id),
     )
     if not record:
         raise HTTPException(status_code=404, detail="Ghost Book record not found")
 
     hits = await fetch(
         """
-        SELECT hit_id, source_name, source_url, raw_content,
-               relevance_score, retrieved_at
+        SELECT hit_id, source_name, source_url, raw_response,
+               match_confidence, retrieved_at
         FROM gibson_ghost_book_source_hit
-        WHERE ghost_id = $1
-        ORDER BY relevance_score DESC
+        WHERE ghost_book_id = $1
+        ORDER BY match_confidence DESC
         """,
-        str(ghost_id),
+        str(ghost_book_id),
     )
     return {**dict(record), "source_hits": [dict(h) for h in hits]}
 
@@ -75,7 +76,7 @@ async def create_ghost_book_record(
         INSERT INTO gibson_ghost_book_record (stock_item_id, physical_description,
                                                date_range, attribution_notes)
         VALUES ($1, $2, $3, $4)
-        RETURNING ghost_id
+        RETURNING ghost_book_id
         """,
         str(stock_item_id) if stock_item_id else None,
         physical_description, date_range, attribution_notes,
@@ -88,12 +89,12 @@ async def create_ghost_book_record(
             str(stock_item_id),
         )
 
-    return {"ghost_id": row["ghost_id"], "status": "queued"}
+    return {"ghost_book_id": row["ghost_book_id"], "status": "queued"}
 
 
-@router.post("/{ghost_id}/confirm")
+@router.post("/{ghost_book_id}/confirm")
 async def confirm_ghost_book(
-    ghost_id: UUID,
+    ghost_book_id: UUID,
     work_data: dict,
 ):
     """Confirm a Ghost Book identification → creates Work + Edition."""
@@ -101,8 +102,8 @@ async def confirm_ghost_book(
         """
         UPDATE gibson_ghost_book_record
         SET research_status = 'CONFIRMED', updated_at = now()
-        WHERE ghost_id = $1
+        WHERE ghost_book_id = $1
         """,
-        str(ghost_id),
+        str(ghost_book_id),
     )
     return {"status": "confirmed"}

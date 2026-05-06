@@ -91,3 +91,8 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+
+def get_settings() -> Settings:
+    """Return the global settings singleton. Exists for agent/script compatibility."""
+    return settings

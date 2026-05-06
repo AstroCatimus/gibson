@@ -21,7 +21,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from api.database import init_pool, close_pool, fetch, execute
+from api.database import init_pool, close_pool, get_pool, fetch, execute
 from api.services.deduplication import find_duplicates
 
 logger = logging.getLogger("gibson.maintenance.dedup")
@@ -37,14 +37,13 @@ async def run_dedup(dry_run: bool = False, source: str | None = None):
     3. Title+author fuzzy dedup on gibson_work (trigram similarity > 0.85)
     4. Log all proposed merges; execute only if not dry_run
     """
-    pool = await init_pool()
+    await init_pool()
     stats = {"isbn_dupes": 0, "fuzzy_dupes": 0, "merged": 0, "skipped": 0}
 
     try:
         # Step 1: ISBN exact duplicates in editions
         logger.info("Phase 1: ISBN exact dedup on editions...")
         isbn_dupes = await fetch(
-            pool,
             """SELECT isbn_13, array_agg(edition_id ORDER BY created_at) as edition_ids,
                       count(*) as cnt
                FROM gibson_edition
@@ -68,17 +67,13 @@ async def run_dedup(dry_run: bool = False, source: str | None = None):
 
             if not dry_run:
                 for merge_id in merge_ids:
-                    await _merge_editions(keep_id, merge_id, pool)
+                    await _merge_editions(keep_id, merge_id)
                     stats["merged"] += 1
 
         # Step 2: Title+author fuzzy dedup on works
         logger.info("Phase 2: Fuzzy title+author dedup on works...")
-        work_filter = ""
-        if source:
-            work_filter = f"-- filtered to source: {source}"
 
         fuzzy_dupes = await fetch(
-            pool,
             """SELECT w1.work_id as id_a, w2.work_id as id_b,
                       w1.title as title_a, w2.title as title_b,
                       similarity(w1.title, w2.title) as sim
@@ -98,7 +93,7 @@ async def run_dedup(dry_run: bool = False, source: str | None = None):
             )
 
             if not dry_run:
-                await _merge_works(dupe["id_a"], dupe["id_b"], pool)
+                await _merge_works(dupe["id_a"], dupe["id_b"])
                 stats["merged"] += 1
 
     finally:
@@ -108,43 +103,33 @@ async def run_dedup(dry_run: bool = False, source: str | None = None):
     return stats
 
 
-async def _merge_editions(keep_id: str, merge_id: str, pool):
+async def _merge_editions(keep_id: str, merge_id: str):
     """Merge a duplicate edition into the canonical one."""
-    # Move stock items to the kept edition
     await execute(
-        pool,
         "UPDATE gibson_stock_item SET edition_id = $1 WHERE edition_id = $2",
         keep_id, merge_id
     )
-    # Move source records
     await execute(
-        pool,
         "UPDATE gibson_source_record SET matched_edition_id = $1 WHERE matched_edition_id = $2",
         keep_id, merge_id
     )
-    # Delete the duplicate
-    await execute(pool, "DELETE FROM gibson_edition_agent WHERE edition_id = $1", merge_id)
-    await execute(pool, "DELETE FROM gibson_edition_publisher WHERE edition_id = $1", merge_id)
-    await execute(pool, "DELETE FROM gibson_edition WHERE edition_id = $1", merge_id)
+    await execute("DELETE FROM gibson_edition_agent WHERE edition_id = $1", merge_id)
+    await execute("DELETE FROM gibson_edition_publisher WHERE edition_id = $1", merge_id)
+    await execute("DELETE FROM gibson_edition WHERE edition_id = $1", merge_id)
 
 
-async def _merge_works(keep_id: str, merge_id: str, pool):
+async def _merge_works(keep_id: str, merge_id: str):
     """Merge a duplicate work into the canonical one."""
-    # Move editions to the kept work
     await execute(
-        pool,
         "UPDATE gibson_edition SET work_id = $1 WHERE work_id = $2",
         keep_id, merge_id
     )
-    # Move work-agent links
     await execute(
-        pool,
         "UPDATE gibson_work_agent SET work_id = $1 WHERE work_id = $2",
         keep_id, merge_id
     )
-    # Delete the duplicate work
-    await execute(pool, "DELETE FROM gibson_work_agent WHERE work_id = $1", merge_id)
-    await execute(pool, "DELETE FROM gibson_work WHERE work_id = $1", merge_id)
+    await execute("DELETE FROM gibson_work_agent WHERE work_id = $1", merge_id)
+    await execute("DELETE FROM gibson_work WHERE work_id = $1", merge_id)
 
 
 if __name__ == "__main__":

@@ -26,6 +26,11 @@ Thumbs.db
 /training/datasets/**/*.jsonl
 !/training/datasets/**/.gitkeep
 
+# Large reference files (inventory exports — keep local only)
+references/*.txt
+references/*.tsv
+references/*.csv
+
 # Node / Expo
 node_modules/
 mobile/dist/

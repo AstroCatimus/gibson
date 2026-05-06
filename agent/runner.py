@@ -20,8 +20,8 @@ from typing import Any
 
 import yaml
 
-from api.config import get_settings
-from api.database import init_pool, close_pool, fetch, fetchrow, execute
+from api.config import settings
+from api.database import init_pool, close_pool, get_pool, fetch, fetchrow, execute
 
 logger = logging.getLogger("gibson.agent")
 
@@ -266,27 +266,26 @@ def _best_confidence(phase_results: list[dict]) -> float:
     return best
 
 
-async def store_results(item_id: str, results: dict, pool):
+async def store_results(item_id: str, results: dict):
     """Persist research results back to the database."""
+    import json
     await execute(
-        pool,
         """UPDATE gibson_stock_item
-           SET research_results = $1::jsonb,
+           SET research_results = $2::jsonb,
                research_completed_at = NOW(),
                status = CASE
-                   WHEN status = 'PENDING_IDENTIFICATION' THEN 'IDENTIFIED'
+                   WHEN status = 'PENDING_IDENTIFICATION' THEN 'PRICING_RESEARCH'
                    ELSE status
                END
            WHERE stock_item_id = $1""",
-        # Note: in production, serialize results and update accordingly
         item_id,
+        json.dumps(results, default=str),
     )
 
 
-async def get_research_queue(pool) -> list[dict]:
+async def get_research_queue() -> list[dict]:
     """Fetch items waiting for overnight research."""
     rows = await fetch(
-        pool,
         """SELECT si.stock_item_id, si.isbn_13, si.status,
                   w.title, w.language,
                   ea.name as author,
@@ -305,14 +304,13 @@ async def get_research_queue(pool) -> list[dict]:
 
 async def main(item_id: str | None = None, dry_run: bool = False):
     """Main entry point for the agent runner."""
-    settings = get_settings()
-    pool = await init_pool()
+    await init_pool()
+    pool = get_pool()   # pool passed to source modules which use pool.fetch() directly
     cascade = load_cascade()
 
     try:
         if item_id:
             row = await fetchrow(
-                pool,
                 "SELECT * FROM gibson_stock_item WHERE stock_item_id = $1",
                 item_id
             )
@@ -321,13 +319,13 @@ async def main(item_id: str | None = None, dry_run: bool = False):
                 return
             items = [dict(row)]
         else:
-            items = await get_research_queue(pool)
+            items = await get_research_queue()
 
         logger.info("Processing %d items", len(items))
         for item in items:
             results = await process_item(item, cascade, pool, dry_run=dry_run)
             if not dry_run:
-                await store_results(str(item["stock_item_id"]), results, pool)
+                await store_results(str(item["stock_item_id"]), results)
             logger.info("Completed item %s", item.get("stock_item_id"))
 
     finally:
