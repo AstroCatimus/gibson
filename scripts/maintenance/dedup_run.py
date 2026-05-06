@@ -124,8 +124,13 @@ async def _merge_works(keep_id: str, merge_id: str):
         "UPDATE gibson_edition SET work_id = $1 WHERE work_id = $2",
         keep_id, merge_id
     )
+    # Insert merge work's agents into keep, skipping any that already exist there
+    # (can't UPDATE because (work_id, agent_id, role) likely has a unique constraint)
     await execute(
-        "UPDATE gibson_work_agent SET work_id = $1 WHERE work_id = $2",
+        """INSERT INTO gibson_work_agent (work_id, agent_id, role, role_order)
+           SELECT $1, agent_id, role, role_order
+           FROM gibson_work_agent WHERE work_id = $2
+           ON CONFLICT DO NOTHING""",
         keep_id, merge_id
     )
     await execute("DELETE FROM gibson_work_agent WHERE work_id = $1", merge_id)

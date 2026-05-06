@@ -251,9 +251,10 @@ async def _upsert(parsed: dict, store_id: str, store_prefix: str,
             )
         location_id = str(loc["location_id"])
 
-    # SKU
+    # SKU — bulk imports use "IMP" pseudo-initials per standing decision
+    # (canonical format is initials-seq; store prefix is only the tap-in fallback)
     seq = await fetchrow("SELECT nextval('gibson_sku_seq') AS seq")
-    sku = f"{store_prefix}-{seq['seq']}"
+    sku = f"IMP-{seq['seq']}"
 
     # Create stock item
     item = await fetchrow(

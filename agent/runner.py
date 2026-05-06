@@ -22,6 +22,7 @@ import yaml
 
 from api.config import settings
 from api.database import init_pool, close_pool, get_pool, fetch, fetchrow, execute
+from agent.synthesis import synthesize
 
 logger = logging.getLogger("gibson.agent")
 
@@ -252,6 +253,21 @@ async def process_item(item: dict, cascade: dict, pool, dry_run: bool = False) -
         p5_results = await run_phase(p5_sources, cascade, query, pool)
         all_results["phase_5"] = p5_results
 
+    # Synthesis — Claude Haiku merges all results into a single authoritative record.
+    # Only runs if we actually fetched results (not dry-run, not empty).
+    if not dry_run and any(all_results.values()):
+        try:
+            synthesis_result = await synthesize(all_results, query)
+            all_results["synthesis"] = synthesis_result
+            logger.info(
+                "Item %s synthesis: confidence=%.2f routing=%s",
+                item.get("stock_item_id", "?"),
+                synthesis_result.get("overall_confidence", 0),
+                synthesis_result.get("routing_recommendation", "UNKNOWN"),
+            )
+        except Exception as e:
+            logger.error("Synthesis failed for item %s: %s", item.get("stock_item_id", "?"), str(e))
+
     return all_results
 
 
@@ -311,7 +327,19 @@ async def main(item_id: str | None = None, dry_run: bool = False):
     try:
         if item_id:
             row = await fetchrow(
-                "SELECT * FROM gibson_stock_item WHERE stock_item_id = $1",
+                """SELECT si.stock_item_id, si.edition_id, si.store_id,
+                          si.gibson_sku, si.status, si.condition_grade,
+                          si.asking_price, si.trust_tier,
+                          si.shelf_verification_status, si.research_results,
+                          e.isbn_13, e.isbn_10, e.publication_year,
+                          w.title, w.language,
+                          a.name_display as author
+                   FROM gibson_stock_item si
+                   LEFT JOIN gibson_edition e ON si.edition_id = e.edition_id
+                   LEFT JOIN gibson_work w ON e.work_id = w.work_id
+                   LEFT JOIN gibson_work_agent wa ON w.work_id = wa.work_id AND wa.role = 'author'
+                   LEFT JOIN gibson_agent a ON wa.agent_id = a.agent_id
+                   WHERE si.stock_item_id = $1""",
                 item_id
             )
             if not row:

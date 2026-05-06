@@ -577,9 +577,11 @@ async def shelf_scan(
                 isbn_digits, store_id,
             )
 
-        # 2b. Fall back to title fuzzy match
+        # 2b. Fall back to title trigram similarity match (requires pg_trgm extension).
+        # similarity() > 0.45 avoids the false positives that ILIKE %title% causes
+        # for short titles (e.g. "It" matching "Iterator Patterns").
         if not item and spine.get("title"):
-            title_q = spine["title"][:50].replace("%", "").strip()
+            title_q = spine["title"].strip()
             item = await fetchrow(
                 """
                 SELECT si.stock_item_id, si.shelf_verification_status,
@@ -588,11 +590,13 @@ async def shelf_scan(
                 LEFT JOIN gibson_edition e  ON e.edition_id  = si.edition_id
                 LEFT JOIN gibson_work w     ON w.work_id     = e.work_id
                 LEFT JOIN gibson_location l ON l.location_id = si.location_id
-                WHERE w.title ILIKE $1 AND si.store_id = $2
+                WHERE similarity(w.title, $1) > 0.45
+                  AND si.store_id = $2
                   AND si.status NOT IN ('WITHDRAWN','SOLD')
+                ORDER BY similarity(w.title, $1) DESC
                 LIMIT 1
                 """,
-                f"%{title_q}%", store_id,
+                title_q, store_id,
             )
 
         if not item:
