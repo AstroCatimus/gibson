@@ -11,10 +11,57 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
+import logging
+import logging.handlers
 import os
+from pathlib import Path
 
 from api.config import settings
 from api.database import init_pool, close_pool
+
+
+# ─── Logging setup ───────────────────────────────────────────
+def setup_logging():
+    """
+    Configure Gibson's logging system.
+
+    All gibson.* loggers write to logs/gibson.log (rotating, 5MB × 5 files).
+    Also mirrors to the console so the terminal still shows output.
+    Uvicorn's own request logs are left alone.
+    """
+    log_dir = Path(__file__).parent.parent / "logs"
+    log_dir.mkdir(exist_ok=True)
+
+    formatter = logging.Formatter(
+        fmt="%(asctime)s  %(levelname)-8s  %(name)s  %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
+
+    # Rotating file — 5 MB per file, keep 5 backups (~25 MB total)
+    file_handler = logging.handlers.RotatingFileHandler(
+        log_dir / "gibson.log",
+        maxBytes=5 * 1024 * 1024,
+        backupCount=5,
+        encoding="utf-8",
+    )
+    file_handler.setFormatter(formatter)
+    file_handler.setLevel(logging.DEBUG)
+
+    # Console mirror
+    console_handler = logging.StreamHandler()
+    console_handler.setFormatter(formatter)
+    console_handler.setLevel(logging.INFO)
+
+    # Attach both handlers to the gibson root logger.
+    # All gibson.* child loggers inherit this automatically.
+    gibson_logger = logging.getLogger("gibson")
+    gibson_logger.setLevel(logging.DEBUG)
+    gibson_logger.addHandler(file_handler)
+    gibson_logger.addHandler(console_handler)
+    gibson_logger.propagate = False  # don't double-log to the root logger
+
+
+setup_logging()
 
 # Import routers
 from api.routers import (

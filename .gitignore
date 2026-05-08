@@ -39,6 +39,10 @@ mobile/android/
 mobile/ios/
 .expo/
 
+# Logs
+logs/
+*.log
+
 # Test
 .coverage
 htmlcov/
