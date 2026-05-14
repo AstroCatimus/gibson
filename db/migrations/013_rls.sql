@@ -84,6 +84,8 @@ ALTER TABLE gibson_location       ENABLE ROW LEVEL SECURITY;
 ALTER TABLE gibson_sale_record    ENABLE ROW LEVEL SECURITY;
 ALTER TABLE gibson_sale_item      ENABLE ROW LEVEL SECURITY;
 ALTER TABLE gibson_buy_queue      ENABLE ROW LEVEL SECURITY;
+-- gibson_want_list has no store_id (links to customer, not store)
+-- treat as authenticated-only, same as bib commons
 ALTER TABLE gibson_want_list      ENABLE ROW LEVEL SECURITY;
 ALTER TABLE gibson_store          ENABLE ROW LEVEL SECURITY;
 ALTER TABLE gibson_store_member   ENABLE ROW LEVEL SECURITY;
@@ -133,12 +135,12 @@ CREATE POLICY store_member_only ON gibson_buy_queue
     USING  (store_id IN (SELECT gibson_my_store_ids()))
     WITH CHECK (store_id IN (SELECT gibson_my_store_ids()));
 
--- gibson_want_list
-DROP POLICY IF EXISTS store_member_only ON gibson_want_list;
-CREATE POLICY store_member_only ON gibson_want_list
+-- gibson_want_list — no store_id, customer-linked, open to authenticated users
+DROP POLICY IF EXISTS want_list_authenticated ON gibson_want_list;
+CREATE POLICY want_list_authenticated ON gibson_want_list
     FOR ALL
-    USING  (store_id IN (SELECT gibson_my_store_ids()))
-    WITH CHECK (store_id IN (SELECT gibson_my_store_ids()));
+    USING  (auth.role() = 'authenticated')
+    WITH CHECK (auth.role() = 'authenticated');
 
 -- gibson_store — members can read their own store's record
 DROP POLICY IF EXISTS store_read_own ON gibson_store;
