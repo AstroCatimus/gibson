@@ -33,20 +33,39 @@ async def fetch_booksrun(isbn: Optional[str] = None) -> list[PriceComp]:
                 return []
 
             data = response.json()
-            result = data.get("result", {})
+            offers = data.get("result", {}).get("offers", {})
 
             comps = []
-            # Buyback prices
-            for condition in ["new", "like_new", "very_good", "good", "acceptable"]:
-                price = result.get("offers", {}).get(condition, {}).get("price")
-                if price and float(price) > 0:
-                    comps.append(PriceComp(
-                        source="booksrun",
-                        price_type="asking",
-                        amount=float(price),
-                        condition=condition.replace("_", " ").title(),
-                        label="ASKING",
-                    ))
+
+            # BooksRun's own prices
+            br = offers.get("booksrun", {})
+            for cond, label in [("used", "Used"), ("new", "New")]:
+                entry = br.get(cond)
+                if isinstance(entry, dict):
+                    price = entry.get("price")
+                    if price and float(price) > 0:
+                        comps.append(PriceComp(
+                            source="booksrun",
+                            price_type="asking",
+                            amount=float(price),
+                            condition=label,
+                            label="ASKING",
+                        ))
+
+            # Marketplace sellers — use for range signal
+            for seller in offers.get("marketplace", []):
+                for cond in ("used", "new"):
+                    entry = seller.get(cond)
+                    if isinstance(entry, dict):
+                        price = entry.get("price")
+                        if price and float(price) > 0:
+                            comps.append(PriceComp(
+                                source="booksrun_marketplace",
+                                price_type="asking",
+                                amount=float(price),
+                                condition=entry.get("condition", cond.title()),
+                                label="ASKING",
+                            ))
 
             return comps
 
