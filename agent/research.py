@@ -24,7 +24,6 @@ import time
 from typing import Optional
 
 import anthropic
-import httpx
 
 from api.config import settings
 from api.services.open_library import fetch_by_isbn, search_by_text
@@ -68,22 +67,6 @@ TOOLS = [
         },
     },
     {
-        "name": "lookup_loc",
-        "description": (
-            "Search the Library of Congress /books/ catalog. Strong coverage for "
-            "pre-1970 and rare books; good for publisher, edition statement, and "
-            "subjects. Accepts ISBN or title+author."
-        ),
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "isbn":   {"type": "string"},
-                "title":  {"type": "string"},
-                "author": {"type": "string"},
-            },
-        },
-    },
-    {
         "name": "lookup_booksrun",
         "description": (
             "Get current buyback and resale pricing from BooksRun. Best for post-1990 "
@@ -108,14 +91,14 @@ Given a book query, use the available tools to find:
 2. PRICING DATA: current market value across multiple sources
 
 SOURCE PRIORITY:
-- Bibliographic: LOC (authoritative, especially pre-1970) + Open Library (broad modern coverage)
+- Bibliographic: Open Library (ISBN lookup first, text search as fallback)
 - Pricing: BooksRun (ISBN required)
 
 EFFICIENCY RULES:
 - You have a maximum of 6 tool calls. Use them wisely.
-- If ISBN is provided: call lookup_open_library_isbn AND lookup_booksrun in your first response (they run in parallel). Add lookup_loc only if you need publisher, edition statement, or subjects.
-- If no ISBN: call search_open_library_text AND lookup_loc together; then lookup_booksrun if you recover an ISBN.
-- Stop calling tools once you have title, author, year, publisher, and at least one pricing signal.
+- If ISBN is provided: call lookup_open_library_isbn AND lookup_booksrun in your first response (they run in parallel)
+- If no ISBN: call search_open_library_text to find the book, then lookup_booksrun if you recover an ISBN
+- Stop calling tools once you have title, author, year, publisher, and at least one pricing signal
 
 OUTPUT: When you have enough data, return ONLY a JSON object in this exact schema:
 {
@@ -171,70 +154,11 @@ async def _dispatch_tool(name: str, inputs: dict):
     if name == "search_open_library_text":
         return await search_by_text(inputs["title"], inputs.get("author"))
 
-    if name == "lookup_loc":
-        return await _loc_catalog(
-            isbn=inputs.get("isbn"),
-            title=inputs.get("title"),
-            author=inputs.get("author"),
-        )
-
     if name == "lookup_booksrun":
         comps = await fetch_booksrun(isbn=inputs["isbn"])
         return [{"amount": c.amount, "label": c.label, "source": c.source} for c in comps]
 
     return {"error": f"Unknown tool: {name}"}
-
-
-# ─── LOC catalog ─────────────────────────────────────────────────────────────
-
-async def _loc_catalog(
-    isbn: Optional[str] = None,
-    title: Optional[str] = None,
-    author: Optional[str] = None,
-) -> Optional[dict]:
-    """
-    Library of Congress /books/ endpoint.
-    https://www.loc.gov/books/?q={query}&fo=json
-    No key required. Returns up to 3 results; we use the first.
-    """
-    if isbn:
-        query = isbn.replace("-", "")
-    elif title:
-        query = f"{title} {author or ''}".strip()
-    else:
-        return None
-
-    try:
-        async with httpx.AsyncClient(timeout=TOOL_TIMEOUT) as client:
-            resp = await client.get(
-                "https://www.loc.gov/books/",
-                params={"q": query, "fo": "json", "c": 3},
-                headers={"User-Agent": "Gibson/1.0 (Alexandria Book Co-op)"},
-            )
-            if resp.status_code != 200:
-                return None
-            results = resp.json().get("results", [])
-            if not results:
-                return None
-            r = results[0]
-            # contributors is a list of {"label": name, "role": role} dicts
-            contributors = r.get("contributors", [])
-            author_name = contributors[0].get("label") if contributors else None
-            subjects = [s.get("label", "") for s in r.get("subject_headings", [])]
-            return {
-                "title":             r.get("title"),
-                "author":            author_name,
-                "publisher":         r.get("publisher"),
-                "year":              r.get("date"),
-                "edition_statement": r.get("edition"),
-                "subjects":          subjects[:5],
-                "url":               r.get("id"),   # full item URL e.g. https://www.loc.gov/item/...
-                "source":            "loc",
-                "confidence":        0.90,
-            }
-    except Exception as e:
-        logger.debug("LOC catalog search failed: %s", e)
-        return None
 
 
 # ─── Agent loop ───────────────────────────────────────────────────────────────
