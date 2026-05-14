@@ -24,12 +24,10 @@ import time
 from typing import Optional
 
 import anthropic
-import httpx
 
 from api.config import settings
 from api.services.open_library import fetch_by_isbn, search_by_text
 from api.services.pricing.booksrun import fetch_booksrun
-from api.services.pricing.bookscouter import fetch_bookscouter
 
 logger = logging.getLogger("gibson.agent.research")
 
@@ -69,55 +67,10 @@ TOOLS = [
         },
     },
     {
-        "name": "lookup_google_books",
-        "description": (
-            "Search Google Books for bibliographic data. Broad coverage, good for "
-            "post-1970 books. Accepts ISBN or title+author."
-        ),
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "isbn":   {"type": "string"},
-                "title":  {"type": "string"},
-                "author": {"type": "string"},
-            },
-        },
-    },
-    {
-        "name": "lookup_loc",
-        "description": (
-            "Search the Library of Congress catalog. Most authoritative source for "
-            "bibliographic data, especially pre-1970 and rare books. Use for publisher, "
-            "edition statement, subjects, and year confirmation."
-        ),
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "isbn":   {"type": "string"},
-                "title":  {"type": "string"},
-                "author": {"type": "string"},
-            },
-        },
-    },
-    {
         "name": "lookup_booksrun",
         "description": (
             "Get current buyback and resale pricing from BooksRun. Best for post-1990 "
             "ISBN books. Returns price range across multiple conditions."
-        ),
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "isbn": {"type": "string", "description": "ISBN-13 required"}
-            },
-            "required": ["isbn"],
-        },
-    },
-    {
-        "name": "lookup_bookscouter",
-        "description": (
-            "Get trend pricing data from BookScouter across 30+ vendors. "
-            "Returns price range labeled TREND."
         ),
         "input_schema": {
             "type": "object",
@@ -138,15 +91,13 @@ Given a book query, use the available tools to find:
 2. PRICING DATA: current market value across multiple sources
 
 SOURCE PRIORITY:
-- Bibliographic: LOC (most authoritative) > Open Library > Google Books
-- Pricing: BooksRun + BookScouter (call both if ISBN available)
-- For pre-1970 or no-ISBN books: LOC is the first call, not the last
+- Bibliographic: Open Library (ISBN lookup first, text search as fallback)
+- Pricing: BooksRun (ISBN required)
 
 EFFICIENCY RULES:
 - You have a maximum of 6 tool calls. Use them wisely.
 - If ISBN is provided: call lookup_open_library_isbn AND lookup_booksrun in your first response (they run in parallel)
-- If no ISBN: call search_open_library_text AND lookup_loc together
-- Only call LOC if you need authoritative confirmation or the other sources were sparse
+- If no ISBN: call search_open_library_text to find the book, then lookup_booksrun if you recover an ISBN
 - Stop calling tools once you have title, author, year, publisher, and at least one pricing signal
 
 OUTPUT: When you have enough data, return ONLY a JSON object in this exact schema:
@@ -203,127 +154,11 @@ async def _dispatch_tool(name: str, inputs: dict):
     if name == "search_open_library_text":
         return await search_by_text(inputs["title"], inputs.get("author"))
 
-    if name == "lookup_google_books":
-        return await _google_books(
-            isbn=inputs.get("isbn"),
-            title=inputs.get("title"),
-            author=inputs.get("author"),
-        )
-
-    if name == "lookup_loc":
-        return await _loc_catalog(
-            isbn=inputs.get("isbn"),
-            title=inputs.get("title"),
-            author=inputs.get("author"),
-        )
-
     if name == "lookup_booksrun":
         comps = await fetch_booksrun(isbn=inputs["isbn"])
         return [{"amount": c.amount, "label": c.label, "source": c.source} for c in comps]
 
-    if name == "lookup_bookscouter":
-        comps = await fetch_bookscouter(isbn=inputs["isbn"])
-        return [{"amount": c.amount, "label": c.label, "source": c.source} for c in comps]
-
     return {"error": f"Unknown tool: {name}"}
-
-
-# ─── Free external lookups ───────────────────────────────────────────────────
-
-async def _google_books(
-    isbn: Optional[str] = None,
-    title: Optional[str] = None,
-    author: Optional[str] = None,
-) -> Optional[dict]:
-    """Google Books API — no key required for basic searches."""
-    if isbn:
-        q = f"isbn:{isbn.replace('-', '')}"
-    elif title:
-        q = f"intitle:{title}"
-        if author:
-            q += f"+inauthor:{author}"
-    else:
-        return None
-
-    try:
-        async with httpx.AsyncClient(timeout=TOOL_TIMEOUT) as client:
-            resp = await client.get(
-                "https://www.googleapis.com/books/v1/volumes",
-                params={"q": q, "maxResults": 3, "fields":
-                        "items(volumeInfo(title,authors,publisher,publishedDate,"
-                        "industryIdentifiers,pageCount,categories,subtitle))"},
-            )
-            if resp.status_code != 200:
-                return None
-            items = resp.json().get("items", [])
-            if not items:
-                return None
-            info = items[0]["volumeInfo"]
-            isbn13 = next(
-                (i["identifier"] for i in info.get("industryIdentifiers", [])
-                 if i["type"] == "ISBN_13"), None
-            )
-            return {
-                "title":       info.get("title"),
-                "subtitle":    info.get("subtitle"),
-                "authors":     info.get("authors", []),
-                "publisher":   info.get("publisher"),
-                "year":        (info.get("publishedDate") or "")[:4] or None,
-                "isbn_13":     isbn13,
-                "page_count":  info.get("pageCount"),
-                "subjects":    info.get("categories", []),
-                "source":      "google_books",
-                "confidence":  0.80,
-            }
-    except Exception as e:
-        logger.debug("Google Books failed: %s", e)
-        return None
-
-
-async def _loc_catalog(
-    isbn: Optional[str] = None,
-    title: Optional[str] = None,
-    author: Optional[str] = None,
-) -> Optional[dict]:
-    """Library of Congress catalog search — free, no key required."""
-    if isbn:
-        query = isbn.replace("-", "")
-    elif title:
-        query = f"{title} {author or ''}".strip()
-    else:
-        return None
-
-    try:
-        async with httpx.AsyncClient(timeout=TOOL_TIMEOUT) as client:
-            resp = await client.get(
-                "https://www.loc.gov/books/",
-                params={"q": query, "fo": "json", "c": 3},
-                headers={"User-Agent": "Gibson/1.0 (Alexandria Book Co-op)"},
-            )
-            if resp.status_code != 200:
-                return None
-            data = resp.json()
-            results = data.get("results", [])
-            if not results:
-                return None
-            r = results[0]
-            contributors = r.get("contributors", [])
-            author_name = contributors[0].get("label") if contributors else None
-            subjects = [s.get("label", "") for s in r.get("subjects", [])]
-            return {
-                "title":             r.get("title"),
-                "author":            author_name,
-                "publisher":         r.get("publisher"),
-                "year":              r.get("date"),
-                "edition_statement": r.get("edition"),
-                "subjects":          subjects[:5],
-                "url":               r.get("url"),
-                "source":            "loc",
-                "confidence":        0.90,
-            }
-    except Exception as e:
-        logger.debug("LOC catalog search failed: %s", e)
-        return None
 
 
 # ─── Agent loop ───────────────────────────────────────────────────────────────
