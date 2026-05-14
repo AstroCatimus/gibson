@@ -2,8 +2,10 @@
 
 **Alexandria Book Co-op** — Driftless Books & Music / Metaphysical Graffiti, Viroqua, Wisconsin
 
-Gibson identifies books from photographs, prices them against real market data,
+Gibson identifies books from photographs and barcodes, prices them against real market data,
 catalogues them into a cooperative database, and lists them for sale.
+
+---
 
 ## Setup on a New Machine
 
@@ -22,7 +24,6 @@ Everything below runs from inside the `gibson` folder unless noted.
 
 ### 2. Python environment
 ```bash
-# Run from: /gibson
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
@@ -30,104 +31,120 @@ pip install -r requirements.txt
 
 ### 3. Environment files
 ```bash
-# Run from: /gibson
 cp .env.example .env
 cp mobile/.env.example mobile/.env
 ```
-Fill both files in with the credentials from Nova.
+Fill both files with the credentials from Nova.
 
-In `mobile/.env`, update this line to your Mac's local IP
-(find it: System Settings → Wi-Fi → Details → IP Address):
+In `mobile/.env`, set your Mac's local IP
+(System Settings → Wi-Fi → Details → IP Address):
 ```
 EXPO_PUBLIC_API_BASE_URL=http://[YOUR_IP]:8000
 ```
 
 ### 4. Mobile dependencies
 ```bash
-# Run from: /gibson
-cd mobile
-npm install
-cd ..
+cd mobile && npm install && cd ..
 ```
 
 ### 5. Run it
-Make sure you're in the root `gibson` folder, then:
 ```bash
 ./start.sh
 ```
-This opens two Terminal windows automatically — one for the backend, one for Expo.
-Scan the QR code with Expo Go on your phone.
+Opens two Terminal windows — backend and Expo. Scan the QR code with Expo Go.
 
-Or manually if preferred — open two separate Terminal windows, both starting from the `gibson` root folder:
-
-**Terminal 1 — backend (run from `/gibson`):**
+Or manually:
 ```bash
+# Terminal 1 — backend
 source .venv/bin/activate
 uvicorn api.main:app --reload --port 8000
-```
 
-**Terminal 2 — mobile (run from `/gibson`):**
-```bash
-cd mobile
-npx expo start
+# Terminal 2 — mobile
+cd mobile && npx expo start
 ```
 
 ### Staying in sync
-Pull changes from the other person before you start working:
 ```bash
-git pull
+git pull          # before you start
+git add -A && git commit -m "what you changed" && git push   # when done
 ```
-Push your changes when done:
-```bash
-git add -A
-git commit -m "describe what you changed"
-git push
-```
-The backend auto-reloads when you pull new code (`--reload` flag handles it).
+
+---
 
 ## Status
 
-> **This is a test system running locally on Mac.** Nothing is hosted — both people run the backend on their own machine. The database (Supabase) is shared but everything else is local. Expect rough edges.
+> **Local dev only.** Database (Supabase) is shared; everything else runs on your machine.
 
-**Works:**
-- Scan a barcode → identifies book, shows price
-- Take a cover photo → identifies book, shows price
-- Confirm → adds to inventory with SKU
+**Working:**
+- Scan barcode → identify → price → confirm → SKU created
+- Take cover photo → identify → price → confirm → SKU created
 - Browse and search inventory
-- Multiple copies of the same book handled correctly
-- New store setup + invite-based onboarding
+- Multiple copies of the same edition handled correctly
+- Amazon / Ka-Zam bulk import
+- Defrag (shelf verification with fuzzy title match)
+- Row-level security in Supabase (bib commons vs. per-store data)
+- Rotating log → `logs/gibson.log` (5 MB × 5 files)
 
-**In progress (not working yet):**
-- Import Amazon / Ka-Zam inventory files
-- Pricing via BookFinder + Vialibri
-- Defrag / inventory management tools
+**In progress:**
 - POS / sale flow
-- Research tab
-- Ghost Book (overnight research for unidentified books)
+- Biblio sync
+- Price refresh worker
+- Import batching (60k books currently ~3–4 hrs; needs parallelism)
 
-**Not started yet:**
+**Not started:**
 - Shelf scanner (scan a whole shelf at once)
 - Whatnot show mode
-- Voice assistant
 - Listing to Biblio / Amazon
+- Store membership gate (get_store_id currently trusts any header)
 
-## Architecture
+---
+
+## How Identification Works
 
 ```
-Photo → OCR + Vision → Identification → Pricing → Catalogue → List for Sale
-         ↓                    ↓              ↓
-    EasyOCR+Paddle      Source Cascade    Vialibri Gate
-    + Claude Sonnet     (100+ sources)    + eBay Sold
-         ↓                    ↓              ↓
-    Confidence Score    Work → Edition    SOLD/ASKING/TREND
-    + Follow-up Ask     → Stock Item      → Dealer Decides
+INCOMING BOOK
+├── Has barcode    → Fast Path   local DB → research agent (ISBN) → confirm
+├── Cover photo    → Standard Path  Vision (Sonnet) → research agent → confirm
+└── Neither        → Slow Path   placeholder created, overnight queue
 ```
+
+**Fast Path (barcode):**
+1. Check local DB — instant return if found
+2. Miss → research agent fires: Open Library + Google Books + LOC + BooksRun + BookScouter in parallel
+3. Falls back to cover photo prompt if confidence < 0.50
+
+**Standard Path (cover photo):**
+1. Claude Vision reads the cover → title / author / ISBN / year with per-field confidence
+2. Research agent enriches: verifies biblio, fetches pricing
+3. Results merged — research wins on any field where it has higher confidence
+4. Confidence ≥ 0.85 → one-tap confirm; 0.50–0.85 → follow-up; < 0.50 → Slow Path
+
+**Research agent tools** (max 6 calls, 5s timeout each, parallel where possible):
+- Open Library (ISBN + text search)
+- Google Books
+- Library of Congress catalog
+- BooksRun (pricing)
+- BookScouter (pricing)
+
+---
 
 ## Schema: Work → Edition → Stock Item (FRBR)
 
-- **Work**: Abstract intellectual creation (title, author, subject)
-- **Edition**: Specific published form (ISBN, publisher, year, format)
-- **Stock Item**: Physical copy in a store (condition, price, location, SKU)
+- **Work** — abstract title/author (shared across all stores)
+- **Edition** — specific ISBN/publisher/year (shared across all stores)
+- **Stock Item** — physical copy: condition, price, location, SKU (private per store)
+
+Bibliographic data is cooperative — every store sees it. Inventory, pricing, and sales are store-private, enforced at the database level via Row Level Security.
+
+---
+
+## Logs
+
+```bash
+tail -f logs/gibson.log
+```
+
+---
 
 ## License
 

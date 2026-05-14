@@ -85,58 +85,49 @@ async def fast_path_barcode(
             copies=copies,
         )
 
-    # Not in local DB — try Open Library
-    from api.services.open_library import fetch_by_isbn as ol_fetch
+    # Not in local DB — run research agent (OL + Google Books + LOC + pricing)
+    from agent.research import run_research
+    import logging
 
-    meta = await ol_fetch(isbn)
-
-    if meta:
+    try:
+        research = await run_research(isbn=isbn, title=None, author=None)
+        base = IdentificationResult(
+            path="fast_path",
+            isbn_13=isbn,
+            confidence=0.0,
+        )
+        result = _merge_research(base, research)
         elapsed = int((time.time() - start) * 1000)
-        authors = meta.get("authors") or []
-        author_str = authors[0] if authors else None
-        pub_year = meta.get("publication_year")
-        if not pub_year:
-            import re
-            pub_date = meta.get("published_date") or ""
-            if pub_date:
-                m = re.search(r"\b(1[5-9]\d{2}|20\d{2})\b", pub_date)
-                pub_year = int(m.group(1)) if m else None
+        result.raw_data = result.raw_data or {}
+        result.raw_data["elapsed_ms"] = elapsed
 
-        cover_url = meta.get("cover_image_url") or None
-        source = meta.get("source", "external")
-        confidence = meta.get("confidence", 0.85)
+        if result.confidence >= 0.85:
+            result.routing_decision = "confirm"
+        elif result.confidence >= 0.50:
+            result.routing_decision = "follow_up"
+            result.follow_up_needed = True
+            result.follow_up_request = "Take a cover photo to confirm condition."
+        else:
+            result.routing_decision = "follow_up"
+            result.follow_up_needed = True
+            result.follow_up_request = "ISBN not found. Take a cover photo for identification."
+        return result
 
+    except Exception as e:
+        logging.getLogger("gibson.identification").warning(
+            "Research agent failed for ISBN %s: %s", isbn, str(e)
+        )
+        elapsed = int((time.time() - start) * 1000)
         return IdentificationResult(
             path="fast_path",
             isbn_13=isbn,
-            title=meta.get("title"),
-            author=author_str,
-            publisher=meta.get("publisher"),
-            publication_year=pub_year,
-            format=meta.get("format"),
-            confidence=confidence,
+            confidence=0.1,
             suggested_price=pricing.suggested_price if pricing else None,
             price_range={"low": pricing.price_range_low, "high": pricing.price_range_high} if pricing else None,
-            routing_decision="confirm" if confidence >= 0.85 else "follow_up",
-            follow_up_needed=confidence < 0.85,
-            follow_up_request="Take a cover photo to confirm condition." if confidence < 0.85 else None,
-            cover_image_url=cover_url,
-            needs_cover_photo=not bool(cover_url),
-            raw_data={"source": source, "elapsed_ms": elapsed},
+            routing_decision="follow_up",
+            follow_up_needed=True,
+            follow_up_request="ISBN not found. Take a cover photo for identification.",
         )
-
-    # Nothing found anywhere — escalate to photo identification
-    elapsed = int((time.time() - start) * 1000)
-    return IdentificationResult(
-        path="fast_path",
-        isbn_13=isbn,
-        confidence=0.1,
-        suggested_price=pricing.suggested_price if pricing else None,
-        price_range={"low": pricing.price_range_low, "high": pricing.price_range_high} if pricing else None,
-        routing_decision="follow_up",
-        follow_up_needed=True,
-        follow_up_request="ISBN not found in any database. Take a cover photo for identification.",
-    )
 
 
 @router.post("/photo", response_model=IdentificationResult)
@@ -145,65 +136,38 @@ async def standard_path_photo(
 ):
     """
     Standard Path — cover photo submitted.
-    Cover image → EasyOCR + PaddleOCR ensemble
-    → Claude Vision (Sonnet): image + OCR text always (hybrid always)
-    → Structured JSON with per-field confidence scores
-    → ≥ 85%: present result
-    → < 85%: request one targeted photo
-    → Pricing fires when identification clears 70%
+
+    Flow:
+    1. Claude Vision (Haiku) reads the cover → extracts title/author/isbn/year
+       Escalates to Sonnet if confidence < threshold
+    2. Research agent (Claude Haiku + tools) verifies and enriches:
+       - High confidence + ISBN: pricing only (BooksRun + BookScouter, ~3s)
+       - Lower confidence or no ISBN: full biblio search (LOC, OL, Google, ~10s)
+    3. Vision + research merged into final result
     """
     from api.services.vision import identify_from_image
-    from api.services.pricing.aggregator import get_pricing
-    from api.services.open_library import fetch_by_isbn as ol_fetch_isbn, search_by_text as ol_search
+    from agent.research import run_research
 
+    # Step 1 — Vision extracts what's on the cover
     result = await identify_from_image(
         image_base64=request.image_base64,
         additional_images=request.additional_images,
     )
 
-    # Cross-reference with Open Library to confirm and fill gaps
-    if result.confidence >= 0.50:
-        ol = None
-        if result.isbn_13:
-            ol = await ol_fetch_isbn(result.isbn_13)
-        if not ol and result.title:
-            ol = await ol_search(result.title, author=result.author)
-
-        if ol:
-            ol_authors = ol.get("authors") or []
-            # Fill any fields Claude left blank or low-confidence
-            if not result.title and ol.get("title"):
-                result.title = ol.get("title")
-            if not result.author and ol_authors:
-                result.author = ol_authors[0]
-            if not result.publisher and ol.get("publisher"):
-                result.publisher = ol.get("publisher")
-            if not result.publication_year and ol.get("publication_year"):
-                result.publication_year = ol.get("publication_year")
-            if not result.isbn_13 and ol.get("isbn"):
-                result.isbn_13 = ol.get("isbn")
-            # Always take OL cover if we don't have one
-            cover_url = ol.get("cover_image_url") or None
-            if cover_url:
-                result.cover_image_url = cover_url
-                result.needs_cover_photo = False
-            else:
-                result.needs_cover_photo = True
-            # OL confirmation bumps confidence slightly
-            result.confidence = min(result.confidence + 0.05, 1.0)
-            result.raw_data = (result.raw_data or {})
-            result.raw_data["ol_confirmed"] = True
-
-    # Fire pricing when identification clears 70%
-    pricing = None
-    if result.confidence >= 0.70 and result.isbn_13:
-        pricing = await get_pricing(isbn_13=result.isbn_13)
-    elif result.confidence >= 0.70 and result.title:
-        pricing = await get_pricing(title=result.title, author=result.author)
-
-    if pricing:
-        result.suggested_price = pricing.suggested_price
-        result.price_range = {"low": pricing.price_range_low, "high": pricing.price_range_high}
+    # Step 2 — Research agent enriches if we have anything to search for
+    if result.confidence >= 0.40 or result.isbn_13 or result.title:
+        try:
+            research = await run_research(
+                isbn=result.isbn_13,
+                title=result.title,
+                author=result.author,
+            )
+            result = _merge_research(result, research)
+        except Exception as e:
+            import logging
+            logging.getLogger("gibson.identification").warning(
+                "Research agent failed, using vision-only result: %s", str(e)
+            )
 
     # Routing decision
     if result.confidence >= 0.85:
@@ -211,10 +175,71 @@ async def standard_path_photo(
     elif result.confidence >= 0.50:
         result.routing_decision = "follow_up"
         result.follow_up_needed = True
-        # Gibson asks for exactly one thing
     else:
         result.routing_decision = "slow_path"
         result.follow_up_request = "Queue for overnight research, or mark in-store only?"
+
+    return result
+
+
+def _merge_research(result: IdentificationResult, research: dict) -> IdentificationResult:
+    """
+    Merge research agent output into an IdentificationResult.
+
+    Research wins on any field where it has higher confidence than vision.
+    Pricing always comes from research (vision has no pricing).
+    Overall confidence takes the higher of the two.
+    """
+    def _val(field: str):
+        f = research.get(field, {})
+        return f.get("value"), f.get("confidence", 0.0)
+
+    title_val,     title_conf     = _val("title")
+    author_val,    author_conf    = _val("author")
+    publisher_val, publisher_conf = _val("publisher")
+    year_val,      year_conf      = _val("year")
+    isbn_val,      isbn_conf      = _val("isbn_13")
+
+    per_field = result.per_field_confidence or {}
+
+    if title_val and title_conf > per_field.get("title", 0):
+        result.title = title_val
+        per_field["title"] = title_conf
+
+    if author_val and author_conf > per_field.get("author", 0):
+        result.author = author_val
+        per_field["author"] = author_conf
+
+    if publisher_val and publisher_conf > per_field.get("publisher", 0):
+        result.publisher = publisher_val
+        per_field["publisher"] = publisher_conf
+
+    if year_val and year_conf > per_field.get("year", 0):
+        result.publication_year = year_val
+        per_field["year"] = year_conf
+
+    if isbn_val and not result.isbn_13:
+        result.isbn_13 = isbn_val
+
+    result.per_field_confidence = per_field
+
+    # Take higher overall confidence
+    research_conf = research.get("overall_confidence", 0.0)
+    result.confidence = max(result.confidence, research_conf)
+
+    # Pricing always from research
+    pricing = research.get("pricing", {})
+    if pricing.get("suggested_price"):
+        result.suggested_price = pricing["suggested_price"]
+        result.price_range = {
+            "low":  pricing.get("range_low"),
+            "high": pricing.get("range_high"),
+        }
+
+    result.raw_data = result.raw_data or {}
+    result.raw_data["research_routing"]    = research.get("routing")
+    result.raw_data["research_tool_calls"] = research.get("tool_calls_made")
+    result.raw_data["research_elapsed_s"]  = research.get("elapsed_seconds")
 
     return result
 
