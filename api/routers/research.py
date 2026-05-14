@@ -5,6 +5,7 @@ Every candidate record goes to human review. No exceptions.
 """
 
 from fastapi import APIRouter, Depends
+from pydantic import BaseModel
 from uuid import UUID
 from typing import Optional
 
@@ -12,6 +13,39 @@ from api.dependencies import get_store_id
 from api.database import fetch, fetchrow, execute
 
 router = APIRouter()
+
+
+# ─── Identify endpoint ───────────────────────────────────────────────────────
+
+class ResearchQuery(BaseModel):
+    isbn:   Optional[str] = None
+    title:  Optional[str] = None
+    author: Optional[str] = None
+    year:   Optional[int] = None
+    model:  Optional[str] = None   # override model for this call (e.g. sonnet for hard cases)
+
+
+@router.post("/identify")
+async def identify(query: ResearchQuery):
+    """
+    Claude-driven book identification and pricing.
+
+    Runs the research agent synchronously — caller waits for the result.
+    Typical response time: 8–15 seconds.
+    Max 6 tool calls, each capped at 5s. Parallel where possible.
+
+    Returns a structured record with per-field confidence scores and
+    a routing recommendation (CONFIRM / REVIEW / GHOST_BOOK / NEEDS_RESEARCH).
+    The result is NEVER written to the catalog automatically.
+    """
+    from agent.research import run_research
+    return await run_research(
+        isbn=query.isbn,
+        title=query.title,
+        author=query.author,
+        year=query.year,
+        model=query.model,
+    )
 
 
 @router.get("/queue")
