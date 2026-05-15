@@ -20,7 +20,6 @@ const CARD   = '#13131f';
 
 const ACCENT = '#e94560';
 const BG = '#0f0f1a';
-const YELLOW = '#f39c12';
 
 const PHOTO_STEPS = [
   { key: 'cover',     label: 'Cover',          instruction: 'Point at the front cover and tap capture.' },

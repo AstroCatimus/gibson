@@ -11,12 +11,15 @@ Model strategy:
 """
 
 import base64
+import logging
 import time
 from typing import Optional
 from uuid import UUID, uuid4
 
 from api.config import settings
 from api.models.identification import IdentificationResult, VisionExtractionResult
+
+logger = logging.getLogger("gibson.vision")
 
 
 async def identify_from_image(
@@ -140,8 +143,9 @@ async def call_claude_vision(
 
     try:
         import anthropic
+        import json
 
-        client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
+        client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
 
         # Build image content blocks
         content = []
@@ -206,25 +210,28 @@ If you cannot determine a field, set it to null and its confidence to 0.
 Be conservative with confidence scores — only rate above 0.85 when very certain.""",
         })
 
-        response = client.messages.create(
+        logger.info("Calling Claude Vision (%s) for cover photo", model)
+        response = await client.messages.create(
             model=model,
             max_tokens=1024,
             messages=[{"role": "user", "content": content}],
         )
 
-        # Parse the JSON response
-        import json
         text = response.content[0].text
-        # Extract JSON from the response
         if "```json" in text:
             text = text.split("```json")[1].split("```")[0]
         elif "```" in text:
             text = text.split("```")[1].split("```")[0]
 
         data = json.loads(text.strip())
+        logger.info(
+            "Vision result: title=%r confidence=%.2f",
+            data.get("title"), data.get("overall_confidence", 0),
+        )
         return VisionExtractionResult(**data)
 
     except Exception as e:
+        logger.error("Vision call failed: %s", str(e))
         return VisionExtractionResult(
             title=None,
             overall_confidence=0.0,
@@ -259,9 +266,9 @@ async def identify_shelf_spines(image_base64: str) -> list[dict]:
     try:
         import anthropic, json
 
-        client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
+        client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
 
-        response = client.messages.create(
+        response = await client.messages.create(
             model=settings.anthropic_vision_escalation_model,
             max_tokens=2048,
             messages=[{
