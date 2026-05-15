@@ -24,6 +24,7 @@ Ka-Zam columns (fixed, from Ka-Zam export):
 Upload returns a job_id immediately. Poll /api/import/status/{job_id} for progress.
 """
 
+import asyncio
 import csv
 import io
 import json
@@ -162,7 +163,8 @@ def _to_float(val) -> Optional[float]:
 
 # ── DB upsert ────────────────────────────────────────────────────
 async def _upsert(parsed: dict, store_id: str, store_prefix: str,
-                  trust_tier: int, edition_cache: dict) -> str:
+                  trust_tier: int, edition_cache: dict,
+                  cache_lock: asyncio.Lock = None) -> str:
     """
     Write one book to Work → Edition → Stock Item.
     Returns 'created' or 'skipped'.
@@ -184,52 +186,54 @@ async def _upsert(parsed: dict, store_id: str, store_prefix: str,
         if exists:
             return "skipped"
 
-    # Find or create Edition (cached by ISBN to avoid repeat lookups)
-    if isbn_13 not in edition_cache:
-        row = await fetchrow(
-            "SELECT edition_id FROM gibson_edition WHERE isbn_13 = $1", isbn_13
-        )
-        if not row:
-            title = parsed.get("title") or "Untitled"
-            title_sort = re.sub(r"^(the|a|an)\s+", "", title.lower()).strip()
-            work = await fetchrow(
-                """
-                INSERT INTO gibson_work (title, title_sort, work_type)
-                VALUES ($1, $2, 'monograph') RETURNING work_id
-                """,
-                title, title_sort,
-            )
+    # Find or create Edition — lock prevents concurrent rows with the same ISBN
+    # from both missing the cache and racing to insert
+    async with (cache_lock or asyncio.Lock()):
+        if isbn_13 not in edition_cache:
             row = await fetchrow(
-                """
-                INSERT INTO gibson_edition (work_id, isbn_13)
-                VALUES ($1, $2) RETURNING edition_id
-                """,
-                str(work["work_id"]), isbn_13,
+                "SELECT edition_id FROM gibson_edition WHERE isbn_13 = $1", isbn_13
             )
-            # Attach author if we have one (Ka-Zam provides this)
-            if parsed.get("author"):
-                author = parsed["author"]
-                parts = author.rsplit(" ", 1)
-                name_sort = f"{parts[-1]}, {parts[0]}" if len(parts) > 1 else author
-                agent = await fetchrow(
-                    "SELECT agent_id FROM gibson_agent WHERE name_display = $1", author
-                )
-                if not agent:
-                    agent = await fetchrow(
-                        """
-                        INSERT INTO gibson_agent (name_display, name_sort, agent_type)
-                        VALUES ($1, $2, 'person') RETURNING agent_id
-                        """,
-                        author, name_sort,
-                    )
-                await execute(
+            if not row:
+                title = parsed.get("title") or "Untitled"
+                title_sort = re.sub(r"^(the|a|an)\s+", "", title.lower()).strip()
+                work = await fetchrow(
                     """
-                    INSERT INTO gibson_work_agent (work_id, agent_id, role, role_order)
-                    VALUES ($1, $2, 'author', 1) ON CONFLICT DO NOTHING
+                    INSERT INTO gibson_work (title, title_sort, work_type)
+                    VALUES ($1, $2, 'monograph') RETURNING work_id
                     """,
-                    str(work["work_id"]), str(agent["agent_id"]),
+                    title, title_sort,
                 )
-        edition_cache[isbn_13] = str(row["edition_id"])
+                row = await fetchrow(
+                    """
+                    INSERT INTO gibson_edition (work_id, isbn_13)
+                    VALUES ($1, $2) RETURNING edition_id
+                    """,
+                    str(work["work_id"]), isbn_13,
+                )
+                # Attach author if we have one (Ka-Zam provides this)
+                if parsed.get("author"):
+                    author = parsed["author"]
+                    parts = author.rsplit(" ", 1)
+                    name_sort = f"{parts[-1]}, {parts[0]}" if len(parts) > 1 else author
+                    agent = await fetchrow(
+                        "SELECT agent_id FROM gibson_agent WHERE name_display = $1", author
+                    )
+                    if not agent:
+                        agent = await fetchrow(
+                            """
+                            INSERT INTO gibson_agent (name_display, name_sort, agent_type)
+                            VALUES ($1, $2, 'person') RETURNING agent_id
+                            """,
+                            author, name_sort,
+                        )
+                    await execute(
+                        """
+                        INSERT INTO gibson_work_agent (work_id, agent_id, role, role_order)
+                        VALUES ($1, $2, 'author', 1) ON CONFLICT DO NOTHING
+                        """,
+                        str(work["work_id"]), str(agent["agent_id"]),
+                    )
+            edition_cache[isbn_13] = str(row["edition_id"])
 
     edition_id = edition_cache[isbn_13]
 
@@ -293,6 +297,8 @@ async def _upsert(parsed: dict, store_id: str, store_prefix: str,
 
 
 # ── Background processors ────────────────────────────────────────
+BATCH_SIZE = 25  # concurrent rows per batch — safe for Supabase connection limits
+
 async def _process(job: dict, content: bytes, parser, trust_tier: int):
     store_id = job["store_id"]
     try:
@@ -306,17 +312,27 @@ async def _process(job: dict, content: bytes, parser, trust_tier: int):
         store_prefix = prefix_row["prefix"] if prefix_row else "GS"
 
         edition_cache: dict = {}
+        cache_lock = asyncio.Lock()
 
-        for i, row in enumerate(reader):
-            try:
-                parsed = parser(row)
-                if parsed is None:
-                    _tick(job, "skipped", i + 1)
-                    continue
-                result = await _upsert(parsed, store_id, store_prefix, trust_tier, edition_cache)
-                _tick(job, result, i + 1)
-            except Exception as e:
-                _tick(job, "error", i + 1, str(e)[:120])
+        # Process in batches of BATCH_SIZE rows concurrently
+        for batch_start in range(0, len(reader), BATCH_SIZE):
+            batch = reader[batch_start:batch_start + BATCH_SIZE]
+
+            async def _handle_row(i, row):
+                try:
+                    parsed = parser(row)
+                    if parsed is None:
+                        _tick(job, "skipped", i + 1)
+                        return
+                    result = await _upsert(parsed, store_id, store_prefix, trust_tier, edition_cache, cache_lock)
+                    _tick(job, result, i + 1)
+                except Exception as e:
+                    _tick(job, "error", i + 1, str(e)[:120])
+
+            await asyncio.gather(*[
+                _handle_row(batch_start + i, row)
+                for i, row in enumerate(batch)
+            ])
 
         job["status"] = "done"
         job["done"] = True
