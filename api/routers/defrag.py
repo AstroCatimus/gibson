@@ -704,6 +704,52 @@ async def shelf_scan(
     }
 
 
+@router.delete("/sections/empty")
+async def delete_empty_sections(store_id: str = Depends(get_store_id)):
+    """Delete all sections that have zero active stock items."""
+    rows = await fetch(
+        """
+        SELECT l.location_id
+        FROM gibson_location l
+        WHERE l.store_id = $1
+          AND NOT EXISTS (
+            SELECT 1 FROM gibson_stock_item si
+            WHERE si.location_id = l.location_id
+              AND si.status NOT IN ('WITHDRAWN', 'SOLD')
+          )
+        """,
+        store_id,
+    )
+    count = 0
+    for row in rows:
+        await execute(
+            "DELETE FROM gibson_location WHERE location_id = $1 AND store_id = $2",
+            str(row["location_id"]), store_id,
+        )
+        count += 1
+    return {"deleted": count}
+
+
+@router.delete("/sections/{location_id}")
+async def delete_section(location_id: str, store_id: str = Depends(get_store_id)):
+    """Delete a single section — only if it has no active stock items."""
+    active = await fetchrow(
+        """
+        SELECT COUNT(*) AS cnt FROM gibson_stock_item
+        WHERE location_id = $1 AND status NOT IN ('WITHDRAWN', 'SOLD')
+        """,
+        location_id,
+    )
+    if active["cnt"] > 0:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=400, detail="Section still has active stock items")
+    await execute(
+        "DELETE FROM gibson_location WHERE location_id = $1 AND store_id = $2",
+        location_id, store_id,
+    )
+    return {"deleted": location_id}
+
+
 @router.post("/resolve-conflict/{stock_item_id}")
 async def resolve_location_conflict(
     stock_item_id: str,

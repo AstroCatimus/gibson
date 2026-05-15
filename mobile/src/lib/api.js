@@ -183,6 +183,12 @@ export const api = {
   defragExport: (format = 'amazon', status = 'all') =>
     `${BASE_URL}/api/defrag/export?format=${format}&status=${status}`,
 
+  defragDeleteSection: (locationId) =>
+    request('DELETE', `/api/defrag/sections/${locationId}`),
+
+  defragDeleteEmptySections: () =>
+    request('DELETE', '/api/defrag/sections/empty'),
+
   // ── Shelf Scan ───────────────────────────────────────────────
   shelfScan: (imageBase64, section, sessionId) =>
     request('POST', '/api/defrag/shelf-scan', {

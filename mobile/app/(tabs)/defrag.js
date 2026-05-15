@@ -62,6 +62,7 @@ export default function DefragScreen() {
   const [stats, setStats]       = useState(null);
   const [sections, setSections] = useState([]);
   const [loading, setLoading]   = useState(true);
+  const [showEmpty, setShowEmpty] = useState(false);
 
   // Queue state
   const [activeSection, setActiveSection]     = useState(null);
@@ -488,23 +489,82 @@ export default function DefragScreen() {
         </TouchableOpacity>
       </View>
 
-      {/* Section list */}
-      <Text style={s.sectionHeader}>Sections</Text>
-      {loading ? null : sections.map((sec) => {
+      {/* Section list header + controls */}
+      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+        <Text style={s.sectionHeader}>Sections</Text>
+        <View style={{ flexDirection: 'row', gap: 8 }}>
+          {sections.some(s => s.total === 0) && (
+            <TouchableOpacity
+              onPress={() => {
+                Alert.alert(
+                  'Clean Up Empty Sections',
+                  'Delete all sections with no active inventory?',
+                  [
+                    { text: 'Cancel', style: 'cancel' },
+                    { text: 'Delete All', style: 'destructive', onPress: async () => {
+                      try {
+                        const r = await api.defragDeleteEmptySections();
+                        Alert.alert('Done', `Removed ${r.deleted} empty section${r.deleted !== 1 ? 's' : ''}`);
+                        loadDashboard();
+                      } catch (e) { Alert.alert('Error', e.message); }
+                    }},
+                  ]
+                );
+              }}
+            >
+              <Text style={{ color: RED, fontSize: 12 }}>Clean up empty</Text>
+            </TouchableOpacity>
+          )}
+          <TouchableOpacity onPress={() => setShowEmpty(v => !v)}>
+            <Text style={{ color: showEmpty ? ACCENT : '#555', fontSize: 12 }}>
+              {showEmpty ? 'Hide empty' : 'Show empty'}
+            </Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+
+      {loading ? null : sections
+        .filter(sec => showEmpty || sec.total > 0)
+        .map((sec) => {
         const pct = sec.total > 0 ? Math.round(sec.verified / sec.total * 100) : 0;
+        const isEmpty = sec.total === 0;
         const hasQueue = sec.unverified > 0;
         return (
           <TouchableOpacity
             key={sec.location_id || sec.section}
-            style={s.sectionCard}
+            style={[s.sectionCard, isEmpty && { borderColor: '#1a1a1a', opacity: 0.6 }]}
             onPress={() => hasQueue && startSection(sec)}
             activeOpacity={hasQueue ? 0.7 : 1}
           >
             <View style={s.sectionTop}>
               <Text style={s.sectionName}>{sec.section}</Text>
-              <Text style={s.sectionPct}>{pct}%</Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                {isEmpty ? (
+                  <TouchableOpacity
+                    onPress={() => {
+                      Alert.alert(
+                        'Delete Section',
+                        `Delete "${sec.section}"? It has no active inventory.`,
+                        [
+                          { text: 'Cancel', style: 'cancel' },
+                          { text: 'Delete', style: 'destructive', onPress: async () => {
+                            try {
+                              await api.defragDeleteSection(sec.location_id);
+                              loadDashboard();
+                            } catch (e) { Alert.alert('Error', e.message); }
+                          }},
+                        ]
+                      );
+                    }}
+                  >
+                    <Text style={{ color: RED, fontSize: 16 }}>🗑</Text>
+                  </TouchableOpacity>
+                ) : (
+                  <Text style={s.sectionPct}>{pct}%</Text>
+                )}
+              </View>
             </View>
-            <ProgressBar pct={pct} color={pct === 100 ? GREEN : ACCENT} />
+            {!isEmpty && <ProgressBar pct={pct} color={pct === 100 ? GREEN : ACCENT} />}
             <View style={s.sectionStats}>
               <Text style={s.sectionStat}>{sec.total} items</Text>
               {sec.unverified > 0 && (
@@ -542,7 +602,7 @@ export default function DefragScreen() {
                 </TouchableOpacity>
               </View>
             )}
-            {!hasQueue && pct === 100 && (
+            {!hasQueue && pct === 100 && !isEmpty && (
               <Text style={[s.sectionStat, { color: GREEN, marginTop: 6 }]}>✓ Complete</Text>
             )}
           </TouchableOpacity>
