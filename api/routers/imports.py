@@ -21,24 +21,37 @@ Ka-Zam columns (fixed, from Ka-Zam export):
   location     = section / shelf location
   id           = external ID for idempotency
 
-Upload returns a job_id immediately. Poll /api/import/status/{job_id} for progress.
+Two import modes:
+  1. Direct upload  — POST /api/import/{amazon|kazam}
+                      Returns job_id immediately; poll /api/import/status/{job_id}.
+                      Requires API to be running during the entire upload.
+
+  2. Queue upload   — Mobile uploads TSV to Supabase Storage, inserts a row in
+                      gibson_import_queue directly via Supabase client (no API needed).
+                      API background worker picks up PENDING rows, downloads from Storage,
+                      and processes them. Mobile polls gibson_import_queue directly.
+                      GET /api/import/queue/{queue_id} also available for status.
 """
 
 import asyncio
 import csv
 import io
 import json
+import logging
 import re
 from typing import Optional
 from uuid import uuid4
 
+import httpx
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, UploadFile
+from api.config import settings
 from api.dependencies import get_store_id
 from api.database import fetch, fetchrow, execute
 
+logger = logging.getLogger("gibson.imports")
 router = APIRouter()
 
-# ── In-memory job tracking ───────────────────────────────────────
+# ── In-memory job tracking (direct-upload mode) ──────────────────
 _jobs: dict = {}
 
 def _new_job(source: str, store_id: str) -> dict:
@@ -383,3 +396,156 @@ async def import_status(job_id: str):
 @router.get("/jobs")
 async def list_jobs():
     return list(_jobs.values())
+
+
+# ── Queue-based import (Supabase Storage) ────────────────────────
+# Mobile uploads the file directly to Supabase Storage, then inserts
+# a row in gibson_import_queue. The worker below picks it up.
+
+STORAGE_BUCKET = "gibson-imports"
+QUEUE_POLL_INTERVAL = 30  # seconds between worker sweeps
+
+
+async def _download_from_storage(storage_path: str) -> bytes:
+    """Download a file from Supabase Storage using the service role key."""
+    url = f"{settings.supabase_url}/storage/v1/object/{STORAGE_BUCKET}/{storage_path}"
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        resp = await client.get(
+            url,
+            headers={"Authorization": f"Bearer {settings.supabase_service_role_key}"},
+        )
+        resp.raise_for_status()
+        return resp.content
+
+
+async def _process_queue_item(queue_id: str) -> None:
+    """Download + process one queue row. Updates the row with progress/results."""
+
+    # Claim the row (PENDING → PROCESSING)
+    row = await fetchrow(
+        """
+        UPDATE gibson_import_queue
+           SET status = 'PROCESSING', updated_at = now()
+         WHERE queue_id = $1 AND status = 'PENDING'
+        RETURNING queue_id, store_id, source, storage_path, filename
+        """,
+        queue_id,
+    )
+    if not row:
+        return  # already claimed by another worker instance
+
+    logger.info("Processing import queue item %s (%s / %s)", queue_id, row["source"], row["filename"])
+
+    parser = _parse_amazon if row["source"] == "amazon" else _parse_kazam
+    trust_tier = 2 if row["source"] == "amazon" else 3
+
+    # Build a synthetic job dict so we can reuse _process() unchanged
+    job = {
+        "job_id": queue_id, "source": row["source"], "store_id": str(row["store_id"]),
+        "status": "running", "done": False,
+        "total": 0, "processed": 0,
+        "created": 0, "skipped": 0, "errors": 0,
+        "pct": 0, "error_details": [],
+    }
+
+    async def _flush_progress():
+        """Write current job counters to the DB row every ~2 s during processing."""
+        await execute(
+            """
+            UPDATE gibson_import_queue
+               SET total = $2, processed = $3, created = $4,
+                   skipped = $5, errors = $6, pct = $7,
+                   error_details = $8::jsonb, updated_at = now()
+             WHERE queue_id = $1
+            """,
+            queue_id,
+            job["total"], job["processed"], job["created"],
+            job["skipped"], job["errors"], job["pct"],
+            json.dumps(job["error_details"]),
+        )
+
+    try:
+        content = await _download_from_storage(row["storage_path"])
+
+        # Run the existing batch processor — it mutates `job` in place
+        await _process(job, content, parser, trust_tier)
+
+        final_status = "DONE" if job["status"] == "done" else "FAILED"
+        await execute(
+            """
+            UPDATE gibson_import_queue
+               SET status = $2, total = $3, processed = $4, created = $5,
+                   skipped = $6, errors = $7, pct = $8,
+                   error_details = $9::jsonb, updated_at = now()
+             WHERE queue_id = $1
+            """,
+            queue_id, final_status,
+            job["total"], job["processed"], job["created"],
+            job["skipped"], job["errors"], job["pct"],
+            json.dumps(job["error_details"]),
+        )
+        logger.info(
+            "Queue item %s %s — created=%d skipped=%d errors=%d",
+            queue_id, final_status, job["created"], job["skipped"], job["errors"],
+        )
+
+    except Exception as exc:
+        logger.exception("Queue item %s failed: %s", queue_id, exc)
+        await execute(
+            """
+            UPDATE gibson_import_queue
+               SET status = 'FAILED',
+                   error_details = $2::jsonb,
+                   updated_at = now()
+             WHERE queue_id = $1
+            """,
+            queue_id,
+            json.dumps([{"row": 0, "error": str(exc)[:200]}]),
+        )
+
+
+async def queue_worker() -> None:
+    """
+    Background task. Runs for the lifetime of the API process.
+    Polls gibson_import_queue every QUEUE_POLL_INTERVAL seconds for PENDING rows
+    and processes them one by one (safe for a single API process; extend with
+    row-level locking if multiple workers are ever needed).
+    """
+    logger.info("Import queue worker started (interval=%ds)", QUEUE_POLL_INTERVAL)
+    while True:
+        try:
+            pending = await fetch(
+                """
+                SELECT queue_id FROM gibson_import_queue
+                 WHERE status = 'PENDING'
+                 ORDER BY created_at
+                 LIMIT 5
+                """,
+            )
+            for row in pending:
+                await _process_queue_item(str(row["queue_id"]))
+        except Exception as exc:
+            logger.warning("Queue worker sweep error: %s", exc)
+
+        await asyncio.sleep(QUEUE_POLL_INTERVAL)
+
+
+# ── Queue status endpoint ─────────────────────────────────────────
+
+@router.get("/queue/{queue_id}")
+async def queue_status(queue_id: str):
+    """Status of a Supabase-Storage-based import queue item."""
+    row = await fetchrow(
+        """
+        SELECT queue_id, store_id, source, filename, status,
+               total, processed, created, skipped, errors, pct,
+               error_details, created_at, updated_at
+          FROM gibson_import_queue
+         WHERE queue_id = $1
+        """,
+        queue_id,
+    )
+    if not row:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail="Queue item not found")
+    return dict(row)

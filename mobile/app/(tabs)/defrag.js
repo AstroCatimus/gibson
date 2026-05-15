@@ -188,14 +188,33 @@ export default function DefragScreen() {
     }
   }
 
-  async function pollJobStatus(jobId) {
+  // Poll the queue row directly from Supabase — no API needed.
+  async function pollQueueStatus(supabaseClient, queueId) {
     try {
-      const BASE_URL = process.env.EXPO_PUBLIC_API_BASE_URL || 'http://localhost:8000';
-      const resp = await fetch(`${BASE_URL}/api/import/status/${jobId}`);
-      if (!resp.ok) return;
-      const data = await resp.json();
-      setImportJob(data);
-      if (data.done) {
+      const { data, error } = await supabaseClient
+        .from('gibson_import_queue')
+        .select('queue_id,status,total,processed,created,skipped,errors,pct,error_details')
+        .eq('queue_id', queueId)
+        .single();
+      if (error || !data) return;
+
+      const done = data.status === 'DONE' || data.status === 'FAILED';
+      setImportJob({
+        queue_id: data.queue_id,
+        status:   data.status === 'DONE' ? 'done'
+                : data.status === 'FAILED' ? 'failed'
+                : data.status === 'PROCESSING' ? 'running'
+                : 'queued',
+        done,
+        total:         data.total     ?? 0,
+        processed:     data.processed ?? 0,
+        created:       data.created   ?? 0,
+        skipped:       data.skipped   ?? 0,
+        errors:        data.errors    ?? 0,
+        pct:           data.pct       ?? 0,
+        error_details: data.error_details ?? [],
+      });
+      if (done) {
         stopPolling();
         setImportLoading(false);
         loadDashboard();
@@ -219,28 +238,55 @@ export default function DefragScreen() {
 
       const { supabase } = await import('../../src/lib/supabase');
       const { data: { session } } = await supabase.auth.getSession();
-      const meta = session?.user?.user_metadata || {};
+      const storeId = session?.user?.user_metadata?.store_id
+                   || process.env.EXPO_PUBLIC_DEFAULT_STORE_ID;
 
-      const formData = new FormData();
-      formData.append('file', { uri: asset.uri, name: asset.name, type: asset.mimeType || 'text/csv' });
-      formData.append('dry_run', 'false');
+      // ── Step 1: Upload file to Supabase Storage ──────────────
+      // Path: {storePrefix}/{timestamp}-{filename}
+      const ts        = Date.now();
+      const safeName  = (asset.name || 'import.tsv').replace(/[^a-zA-Z0-9._-]/g, '_');
+      const storePrefix = storeId?.slice(-4) || 'xx';  // last 4 chars of UUID for readability
+      const storagePath = `${storePrefix}/${ts}-${safeName}`;
 
-      const BASE_URL = process.env.EXPO_PUBLIC_API_BASE_URL || 'http://localhost:8000';
-      const resp = await fetch(`${BASE_URL}/api/import/${source}`, {
-        method: 'POST',
-        headers: {
-          'X-Store-Id':       meta.store_id || '',
-          'X-Employee-Id':    session?.user?.id || '',
-          'X-Employee-Email': session?.user?.email || '',
-        },
-        body: formData,
-      });
-      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-      const { job_id } = await resp.json();
+      setImportJob({ status: 'uploading', pct: 0, done: false });
 
-      setImportJob({ job_id, status: 'running', pct: 0, created: 0, skipped: 0, errors: 0 });
+      // Read file bytes and upload
+      const fileResp  = await fetch(asset.uri);
+      const buffer    = await fileResp.arrayBuffer();
+
+      const { error: uploadError } = await supabase.storage
+        .from('gibson-imports')
+        .upload(storagePath, buffer, {
+          contentType: asset.mimeType || 'text/tab-separated-values',
+          upsert: false,
+        });
+
+      if (uploadError) throw new Error(`Upload failed: ${uploadError.message}`);
+
+      // ── Step 2: Insert queue row (direct to Supabase DB) ─────
+      // No API needed — mobile writes directly via Supabase client.
+      const { data: queueRow, error: insertError } = await supabase
+        .from('gibson_import_queue')
+        .insert({
+          store_id:     storeId,
+          source:       source,
+          storage_path: storagePath,
+          filename:     asset.name || safeName,
+          status:       'PENDING',
+        })
+        .select('queue_id')
+        .single();
+
+      if (insertError) throw new Error(`Queue insert failed: ${insertError.message}`);
+
+      // ── Step 3: Poll the queue row directly ──────────────────
+      const queueId = queueRow.queue_id;
+      setImportJob({ queue_id: queueId, status: 'queued', pct: 0, done: false,
+                     total: 0, processed: 0, created: 0, skipped: 0, errors: 0,
+                     error_details: [] });
       stopPolling();
-      importPollRef.current = setInterval(() => pollJobStatus(job_id), 2000);
+      importPollRef.current = setInterval(() => pollQueueStatus(supabase, queueId), 2500);
+
     } catch (e) {
       setImportLoading(false);
       Alert.alert('Import Error', e.message);
@@ -270,7 +316,7 @@ export default function DefragScreen() {
 
         <Text style={s.pageTitle}>Import Inventory</Text>
         <Text style={s.pageSubtitle}>
-          Upload a CSV or TSV export from Amazon or Ka-Zam. Each row becomes a stock item.
+          Upload a CSV or TSV export. The file goes to Supabase — the API processes it whenever it's running. You don't have to stay on this screen.
         </Text>
 
         <Text style={s.sectionHeader}>Source Format</Text>
@@ -300,11 +346,11 @@ export default function DefragScreen() {
           onPress={() => pickAndImport(importSource)}
           disabled={importLoading}
         >
-          {importLoading && !importJob
+          {importLoading && (!importJob || importJob.status === 'uploading')
             ? <ActivityIndicator color={C.bg} />
             : <>
                 <Ionicons name="cloud-upload-outline" size={18} color={C.bg} />
-                <Text style={imp.uploadTxt}>Choose File & Import</Text>
+                <Text style={imp.uploadTxt}>Choose File & Upload</Text>
               </>
           }
         </TouchableOpacity>
@@ -313,34 +359,46 @@ export default function DefragScreen() {
           <View style={imp.resultCard}>
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 10 }}>
               <Text style={imp.resultTitle}>
-                {importJob.done
-                  ? (importJob.status === 'failed' ? 'Import Failed' : 'Import Complete')
-                  : 'Importing…'}
+                {importJob.status === 'uploading' ? 'Uploading…'
+                 : importJob.status === 'queued'   ? 'Queued — waiting for API'
+                 : importJob.status === 'running'  ? 'Processing…'
+                 : importJob.status === 'failed'   ? 'Import Failed'
+                 :                                   'Import Complete'}
               </Text>
-              <Text style={{ color: C.text2, fontSize: 13, fontWeight: '700' }}>{importJob.pct ?? 0}%</Text>
+              {importJob.status !== 'uploading' && importJob.status !== 'queued' && (
+                <Text style={{ color: C.text2, fontSize: 13, fontWeight: '700' }}>{importJob.pct ?? 0}%</Text>
+              )}
             </View>
 
-            <ProgressBar pct={importJob.pct ?? 0}
-              color={importJob.status === 'failed' ? C.red : importJob.done ? C.green : C.accent} />
-
-            <Text style={{ color: C.text3, fontSize: 11, marginTop: 8, marginBottom: 14 }}>
-              {importJob.processed ?? 0} / {importJob.total ?? '?'} rows processed
-            </Text>
-
-            <View style={imp.resultRow}>
-              <ResultStat label="Created" value={importJob.created ?? 0} color={C.green} />
-              <ResultStat label="Skipped" value={importJob.skipped ?? 0} color={C.yellow} />
-              <ResultStat label="Errors"  value={importJob.errors  ?? 0} color={C.red} />
-            </View>
-
-            {importJob.error_details?.length > 0 && (
+            {importJob.status === 'queued' ? (
+              <Text style={{ color: C.text3, fontSize: 12, lineHeight: 18 }}>
+                File uploaded to Supabase. The API will pick it up automatically — you can close this screen and come back later.
+              </Text>
+            ) : (
               <>
-                <Text style={{ color: C.red, fontSize: 12, marginTop: 14, marginBottom: 6 }}>First errors:</Text>
-                {importJob.error_details.map((e, i) => (
-                  <Text key={i} style={{ color: C.text3, fontSize: 11, marginBottom: 2 }}>
-                    Row {e.row}: {e.error}
-                  </Text>
-                ))}
+                <ProgressBar pct={importJob.pct ?? 0}
+                  color={importJob.status === 'failed' ? C.red : importJob.done ? C.green : C.accent} />
+
+                <Text style={{ color: C.text3, fontSize: 11, marginTop: 8, marginBottom: 14 }}>
+                  {importJob.processed ?? 0} / {importJob.total ?? '?'} rows processed
+                </Text>
+
+                <View style={imp.resultRow}>
+                  <ResultStat label="Created" value={importJob.created ?? 0} color={C.green} />
+                  <ResultStat label="Skipped" value={importJob.skipped ?? 0} color={C.yellow} />
+                  <ResultStat label="Errors"  value={importJob.errors  ?? 0} color={C.red} />
+                </View>
+
+                {importJob.error_details?.length > 0 && (
+                  <>
+                    <Text style={{ color: C.red, fontSize: 12, marginTop: 14, marginBottom: 6 }}>First errors:</Text>
+                    {importJob.error_details.map((e, i) => (
+                      <Text key={i} style={{ color: C.text3, fontSize: 11, marginBottom: 2 }}>
+                        Row {e.row}: {e.error}
+                      </Text>
+                    ))}
+                  </>
+                )}
               </>
             )}
           </View>

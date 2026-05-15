@@ -6,6 +6,7 @@ FastAPI application entry point.
 Serves the API and the PWA static files.
 """
 
+import asyncio
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -87,7 +88,11 @@ from api.routers import (
 async def lifespan(app: FastAPI):
     """Startup and shutdown events."""
     await init_pool()
+    # Start import queue worker — picks up Supabase-Storage-based imports
+    from api.routers.imports import queue_worker
+    worker_task = asyncio.create_task(queue_worker())
     yield
+    worker_task.cancel()
     await close_pool()
 
 
