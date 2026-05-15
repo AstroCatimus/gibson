@@ -16,11 +16,12 @@ catalogues them into a cooperative database, and lists them for sale.
 - Expo Go on your phone: App Store → "Expo Go"
 
 ### 1. Clone the repo
+Open **Terminal** (Applications → Utilities → Terminal), then run:
 ```bash
 git clone https://github.com/AstroCatimus/gibson.git
 cd gibson
 ```
-Everything below runs from inside the `gibson` folder unless noted.
+All commands from here on are run inside the `gibson` folder in Terminal, unless noted.
 
 ### 2. Python environment
 ```bash
@@ -36,11 +37,12 @@ cp mobile/.env.example mobile/.env
 ```
 Fill both files with the credentials from Nova.
 
-In `mobile/.env`, set your Mac's local IP
-(System Settings → Wi-Fi → Details → IP Address):
+In `mobile/.env`, set your Mac's local IP — find it under
+System Settings → Wi-Fi → Details → IP Address:
 ```
 EXPO_PUBLIC_API_BASE_URL=http://[YOUR_IP]:8000
 ```
+You'll need to update this whenever your IP changes (usually after rejoining Wi-Fi).
 
 ### 4. Mobile dependencies
 ```bash
@@ -48,25 +50,35 @@ cd mobile && npm install && cd ..
 ```
 
 ### 5. Run it
+Still in the `gibson` folder in Terminal:
 ```bash
 ./start.sh
 ```
-Opens two Terminal windows — backend and Expo. Scan the QR code with Expo Go.
+This opens two Terminal windows automatically — one for the backend, one for Expo.
+Scan the QR code that appears with the **Expo Go** app on your phone.
 
-Or manually:
+> **If `./start.sh` says "permission denied"**, run this once to fix it:
+> ```bash
+> chmod +x start.sh
+> ```
+
+To run manually instead (if start.sh doesn't work):
 ```bash
-# Terminal 1 — backend
+# Terminal 1 — backend (run from the gibson folder)
 source .venv/bin/activate
 uvicorn api.main:app --reload --port 8000
 
-# Terminal 2 — mobile
-cd mobile && npx expo start
+# Terminal 2 — mobile (open a new Terminal window, then run)
+cd gibson/mobile && npx expo start
 ```
 
 ### Staying in sync
 ```bash
-git pull          # before you start
-git add -A && git commit -m "what you changed" && git push   # when done
+# Run these in the gibson folder before you start work each day:
+git pull
+
+# When you're done and want to save your changes:
+git add -A && git commit -m "what you changed" && git push
 ```
 
 ---
@@ -89,7 +101,6 @@ git add -A && git commit -m "what you changed" && git push   # when done
 - POS / sale flow
 - Biblio sync
 - Price refresh worker
-- Import batching (60k books currently ~3–4 hrs; needs parallelism)
 
 **Not started:**
 - Shelf scanner (scan a whole shelf at once)
@@ -119,12 +130,10 @@ INCOMING BOOK
 3. Results merged — research wins on any field where it has higher confidence
 4. Confidence ≥ 0.85 → one-tap confirm; 0.50–0.85 → follow-up; < 0.50 → Slow Path
 
-**Research agent tools** (max 6 calls, 5s timeout each, parallel where possible):
-- Open Library (ISBN + text search)
-- Google Books
-- Library of Congress catalog
+**Research agent tools** (parallel where possible, 5s timeout each):
+- Open Library (ISBN lookup + text search)
+- Library of Congress catalog (`/books/` endpoint)
 - BooksRun (pricing)
-- BookScouter (pricing)
 
 ---
 
