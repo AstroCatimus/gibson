@@ -91,14 +91,18 @@ export default function DefragScreen() {
   useEffect(() => { loadDashboard(); }, [loadDashboard]);
 
   async function startSection(section) {
+    // Show the queue view immediately — load session + first batch in parallel
+    setActiveSection(section);
+    setCardIndex(0);
+    setQueueOffset(0);
+    setQueue([]);
+    setView('queue');
     try {
-      const sess = await api.defragStartSession(section.section);
+      const [sess] = await Promise.all([
+        api.defragStartSession(section.section),
+        loadQueue(section.section, 0),
+      ]);
       setSessionId(sess.session_id);
-      setActiveSection(section);
-      setCardIndex(0);
-      setQueueOffset(0);
-      await loadQueue(section.section, 0);
-      setView('queue');
     } catch (e) {
       Alert.alert('Error', e.message);
     }
@@ -123,15 +127,14 @@ export default function DefragScreen() {
     }
   }
 
-  async function verifyAction(action, extras = {}) {
+  function verifyAction(action, extras = {}) {
     const item = queue[cardIndex];
     if (!item) return;
-    try {
-      await api.defragVerify(item.stock_item_id, action, { session_id: sessionId, ...extras });
-      advanceCard();
-    } catch (e) {
-      Alert.alert('Error', e.message);
-    }
+    // Advance immediately — never block the UI on a network round-trip.
+    // Fire-and-forget; the status update is non-critical in the moment.
+    advanceCard();
+    api.defragVerify(item.stock_item_id, action, { session_id: sessionId, ...extras })
+      .catch(e => console.warn(`verify ${action} failed silently:`, e.message));
   }
 
   function advanceCard() {
