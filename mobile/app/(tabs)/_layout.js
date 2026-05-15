@@ -1,36 +1,46 @@
 /**
  * Gibson — Tab navigator layout.
- * Five tabs: Scan, Books, Sale, Research, Settings.
+ * Six tabs: Scan · Books · Sale · Review · Verify · Account
  */
 
 import { Tabs } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { Platform } from 'react-native';
+import { Platform, View } from 'react-native';
+import { C } from '../../src/lib/theme';
 
-const ACCENT = '#e94560';
-const BG = '#0f0f1a';
-const INACTIVE = '#444';
-const TAB_BG = '#0c0c17';
+function TabIcon({ name, color, size, focused }) {
+  return (
+    <View style={{ alignItems: 'center', justifyContent: 'center' }}>
+      <Ionicons name={name} color={color} size={focused ? size : size - 1} />
+    </View>
+  );
+}
 
 export default function TabLayout() {
   return (
     <Tabs
       screenOptions={{
-        headerStyle: { backgroundColor: BG },
-        headerTintColor: '#fff',
-        headerTitleStyle: { fontWeight: '700', fontSize: 17 },
+        headerStyle: { backgroundColor: C.surface },
+        headerTintColor: C.text,
+        headerTitleStyle: { fontWeight: '700', fontSize: 17, color: C.text },
         headerShadowVisible: false,
+        headerTitleAlign: 'left',
         tabBarStyle: {
-          backgroundColor: TAB_BG,
-          borderTopColor: '#1a1a2a',
+          backgroundColor: C.surface,
+          borderTopColor: C.border,
           borderTopWidth: 1,
-          height: Platform.OS === 'ios' ? 84 : 64,
-          paddingBottom: Platform.OS === 'ios' ? 24 : 8,
+          height: Platform.OS === 'ios' ? 88 : 64,
+          paddingBottom: Platform.OS === 'ios' ? 28 : 8,
           paddingTop: 8,
         },
-        tabBarActiveTintColor: ACCENT,
-        tabBarInactiveTintColor: INACTIVE,
-        tabBarLabelStyle: { fontSize: 10, fontWeight: '600', letterSpacing: 0.3 },
+        tabBarActiveTintColor: C.accent,
+        tabBarInactiveTintColor: C.text3,
+        tabBarLabelStyle: {
+          fontSize: 10,
+          fontWeight: '600',
+          letterSpacing: 0.2,
+          marginTop: 1,
+        },
       }}
     >
       <Tabs.Screen
@@ -38,8 +48,8 @@ export default function TabLayout() {
         options={{
           title: 'Scan',
           headerShown: false,
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="camera-outline" color={color} size={size} />
+          tabBarIcon: ({ color, size, focused }) => (
+            <TabIcon name={focused ? 'scan' : 'scan-outline'} color={color} size={size} focused={focused} />
           ),
         }}
       />
@@ -47,8 +57,9 @@ export default function TabLayout() {
         name="inventory"
         options={{
           title: 'Books',
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="library-outline" color={color} size={size} />
+          headerTitle: 'Inventory',
+          tabBarIcon: ({ color, size, focused }) => (
+            <TabIcon name={focused ? 'library' : 'library-outline'} color={color} size={size} focused={focused} />
           ),
         }}
       />
@@ -56,35 +67,39 @@ export default function TabLayout() {
         name="pos"
         options={{
           title: 'Sale',
+          headerTitle: 'Point of Sale',
           tabBarIcon: ({ color, size, focused }) => (
-            <Ionicons name={focused ? 'cart' : 'cart-outline'} color={color} size={size} />
+            <TabIcon name={focused ? 'receipt' : 'receipt-outline'} color={color} size={size} focused={focused} />
           ),
         }}
       />
       <Tabs.Screen
         name="research"
         options={{
-          title: 'Research',
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="flask-outline" color={color} size={size} />
+          title: 'Review',
+          headerTitle: 'Review Queue',
+          tabBarIcon: ({ color, size, focused }) => (
+            <TabIcon name={focused ? 'file-tray-full' : 'file-tray-full-outline'} color={color} size={size} focused={focused} />
           ),
         }}
       />
       <Tabs.Screen
         name="defrag"
         options={{
-          title: 'Defrag',
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="checkmark-circle-outline" color={color} size={size} />
+          title: 'Verify',
+          headerTitle: 'Shelf Verification',
+          tabBarIcon: ({ color, size, focused }) => (
+            <TabIcon name={focused ? 'checkmark-done-circle' : 'checkmark-done-circle-outline'} color={color} size={size} focused={focused} />
           ),
         }}
       />
       <Tabs.Screen
         name="settings"
         options={{
-          title: 'Settings',
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="person-circle-outline" color={color} size={size} />
+          title: 'Account',
+          headerTitle: 'Account & Settings',
+          tabBarIcon: ({ color, size, focused }) => (
+            <TabIcon name={focused ? 'person-circle' : 'person-circle-outline'} color={color} size={size} focused={focused} />
           ),
         }}
       />

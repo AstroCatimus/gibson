@@ -9,32 +9,32 @@ import {
   TouchableOpacity, ActivityIndicator, Modal, ScrollView,
   Switch, Alert,
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { api } from '../../src/lib/api';
+import { C, COND_COLOR } from '../../src/lib/theme';
 
-const ACCENT = '#e94560';
-const BG = '#0f0f1a';
-const CARD = '#13131f';
-const GREEN = '#2ecc71';
-
-const COND_COLOR = {
-  'Fine': '#2ecc71', 'Very Good+': '#27ae60', 'Very Good': '#3498db',
-  'Good+': '#9b59b6', 'Good': '#f39c12', 'Fair': '#e67e22', 'Poor': '#e74c3c',
-};
-const GRADES = ['Fine', 'Very Good+', 'Very Good', 'Good+', 'Good', 'Fair', 'Poor'];
+const GRADES   = ['Fine', 'Very Good+', 'Very Good', 'Good+', 'Good', 'Fair', 'Poor'];
 const STATUSES = ['AVAILABLE', 'LISTED', 'HOLD', 'IN_STORE_ONLY', 'WITHDRAWN'];
 
+const STATUS_LABEL = {
+  AVAILABLE:    'Available',
+  LISTED:       'Listed',
+  HOLD:         'On Hold',
+  IN_STORE_ONLY:'In-Store',
+  WITHDRAWN:    'Withdrawn',
+};
+
 export default function InventoryScreen() {
-  const [items, setItems]       = useState([]);
-  const [stats, setStats]       = useState(null);
-  const [query, setQuery]       = useState('');
-  const [loading, setLoading]   = useState(true);
+  const [items, setItems]         = useState([]);
+  const [stats, setStats]         = useState(null);
+  const [query, setQuery]         = useState('');
+  const [loading, setLoading]     = useState(true);
   const [searching, setSearching] = useState(false);
 
-  const [editing, setEditing]   = useState(null);   // stock item being edited
+  const [editing, setEditing]   = useState(null);
   const [sections, setSections] = useState([]);
   const [saving, setSaving]     = useState(false);
 
-  // edit fields
   const [ePrice, setEPrice]         = useState('');
   const [eCondition, setECondition] = useState('');
   const [eSection, setESection]     = useState('');
@@ -88,7 +88,7 @@ export default function InventoryScreen() {
     try {
       const loc = sections.find(s => s.section === eSection);
       await api.updateItem(editing.stock_item_id, {
-        asking_price:   ePrice ? parseFloat(ePrice) : null,
+        asking_price:    ePrice ? parseFloat(ePrice) : null,
         condition_grade: eCondition || null,
         status:          eStatus,
         location_id:     loc ? String(loc.location_id) : null,
@@ -133,24 +133,34 @@ export default function InventoryScreen() {
   }
 
   function renderItem({ item }) {
-    const condColor = COND_COLOR[item.condition_grade] || '#555';
+    const condColor = COND_COLOR[item.condition_grade] || C.text3;
     return (
       <TouchableOpacity style={s.item} onPress={() => openEdit(item)} activeOpacity={0.7}>
-        <View style={s.itemMain}>
-          <Text style={s.itemTitle} numberOfLines={1}>{item.title || 'Untitled'}</Text>
-          <Text style={s.itemAuthor} numberOfLines={1}>{item.author || ''}</Text>
-          <View style={s.itemMeta}>
-            {item.gibson_sku ? <Text style={s.itemSku}>{item.gibson_sku}</Text> : null}
-            {item.section ? <Text style={s.itemSection}>{item.section}</Text> : null}
-          </View>
-        </View>
-        <View style={s.itemRight}>
-          <Text style={s.itemPrice}>${(item.asking_price || 0).toFixed(2)}</Text>
-          {item.condition_grade ? (
-            <View style={[s.condBadge, { borderColor: condColor }]}>
-              <Text style={[s.condBadgeText, { color: condColor }]}>{item.condition_grade}</Text>
+        {/* Condition stripe */}
+        <View style={[s.condStripe, { backgroundColor: condColor }]} />
+        <View style={s.itemBody}>
+          <View style={s.itemMain}>
+            <Text style={s.itemTitle} numberOfLines={1}>{item.title || 'Untitled'}</Text>
+            <Text style={s.itemAuthor} numberOfLines={1}>{item.author || ''}</Text>
+            <View style={s.itemMeta}>
+              {item.gibson_sku ? (
+                <Text style={s.itemSku}>{item.gibson_sku}</Text>
+              ) : null}
+              {item.section ? (
+                <View style={s.sectionPill}>
+                  <Text style={s.sectionPillText}>{item.section}</Text>
+                </View>
+              ) : null}
             </View>
-          ) : null}
+          </View>
+          <View style={s.itemRight}>
+            <Text style={s.itemPrice}>
+              {item.asking_price != null ? `$${item.asking_price.toFixed(2)}` : '—'}
+            </Text>
+            {item.condition_grade ? (
+              <Text style={[s.condLabel, { color: condColor }]}>{item.condition_grade}</Text>
+            ) : null}
+          </View>
         </View>
       </TouchableOpacity>
     );
@@ -158,47 +168,51 @@ export default function InventoryScreen() {
 
   return (
     <View style={s.container}>
-      {/* Stats */}
+
+      {/* ── Stats banner ── */}
       {stats && (
         <View style={s.statsRow}>
           <View style={s.stat}>
             <Text style={s.statNum}>{stats.available ?? 0}</Text>
             <Text style={s.statLabel}>Available</Text>
           </View>
-          <View style={[s.stat, s.statBorder]}>
+          <View style={[s.stat, s.statDivider]}>
             <Text style={s.statNum}>{stats.total ?? 0}</Text>
             <Text style={s.statLabel}>Total</Text>
           </View>
           <View style={s.stat}>
-            <Text style={[s.statNum, { color: GREEN }]}>${(stats.total_value || 0).toFixed(0)}</Text>
+            <Text style={[s.statNum, { color: C.accent }]}>
+              ${(stats.total_value || 0).toFixed(0)}
+            </Text>
             <Text style={s.statLabel}>Value</Text>
           </View>
         </View>
       )}
 
-      {/* Search */}
-      <View style={s.searchRow}>
-        <View style={s.searchWrap}>
-          <Text style={s.searchIcon}>⌕</Text>
-          <TextInput
-            style={s.searchInput}
-            value={query}
-            onChangeText={handleSearch}
-            placeholder="Search title, author, ISBN…"
-            placeholderTextColor="#444"
-            returnKeyType="search"
-          />
-          {query.length > 0 && (
-            <TouchableOpacity onPress={() => handleSearch('')} style={s.clearBtn}>
-              <Text style={s.clearBtnText}>✕</Text>
-            </TouchableOpacity>
-          )}
-        </View>
-        {searching && <ActivityIndicator color={ACCENT} style={{ marginLeft: 8 }} />}
+      {/* ── Search ── */}
+      <View style={s.searchBar}>
+        <Ionicons name="search-outline" size={16} color={C.text3} style={{ marginRight: 8 }} />
+        <TextInput
+          style={s.searchInput}
+          value={query}
+          onChangeText={handleSearch}
+          placeholder="Search title, author, ISBN…"
+          placeholderTextColor={C.text3}
+          returnKeyType="search"
+        />
+        {searching
+          ? <ActivityIndicator color={C.accent} size="small" />
+          : query.length > 0
+            ? (
+              <TouchableOpacity onPress={() => handleSearch('')} style={s.clearBtn}>
+                <Ionicons name="close-circle" size={16} color={C.text3} />
+              </TouchableOpacity>
+            ) : null
+        }
       </View>
 
       {loading
-        ? <ActivityIndicator color={ACCENT} style={{ marginTop: 40 }} />
+        ? <ActivityIndicator color={C.accent} style={{ marginTop: 48 }} />
         : (
           <FlatList
             data={items}
@@ -216,25 +230,33 @@ export default function InventoryScreen() {
         )
       }
 
-      {/* Edit Modal */}
+      {/* ── Edit modal ── */}
       <Modal visible={!!editing} animationType="slide" transparent onRequestClose={() => setEditing(null)}>
         <View style={s.modalOverlay}>
           <View style={s.modalSheet}>
-            <ScrollView contentContainerStyle={s.modalContent}>
+
+            {/* Drag handle */}
+            <View style={s.sheetHandle} />
+
+            <ScrollView contentContainerStyle={s.modalContent} showsVerticalScrollIndicator={false}>
 
               <View style={s.modalHeader}>
-                <Text style={s.modalTitle} numberOfLines={2}>{editing?.title || 'Edit Book'}</Text>
+                <View style={{ flex: 1 }}>
+                  <Text style={s.modalTitle} numberOfLines={2}>{editing?.title || 'Edit Book'}</Text>
+                  {editing?.author ? (
+                    <Text style={s.modalAuthor}>{editing.author}</Text>
+                  ) : null}
+                  {editing?.gibson_sku ? (
+                    <Text style={s.modalSku}>{editing.gibson_sku}</Text>
+                  ) : null}
+                </View>
                 <TouchableOpacity onPress={() => setEditing(null)} style={s.modalClose}>
-                  <Text style={s.modalCloseText}>✕</Text>
+                  <Ionicons name="close" size={22} color={C.text2} />
                 </TouchableOpacity>
               </View>
 
-              {editing?.gibson_sku ? (
-                <Text style={s.modalSku}>{editing.gibson_sku}</Text>
-              ) : null}
-
               {/* Price */}
-              <Text style={s.fieldLabel}>Price</Text>
+              <Text style={s.fieldLabel}>Asking Price</Text>
               <View style={s.priceRow}>
                 <Text style={s.dollar}>$</Text>
                 <TextInput
@@ -243,7 +265,7 @@ export default function InventoryScreen() {
                   onChangeText={setEPrice}
                   keyboardType="decimal-pad"
                   placeholder="0.00"
-                  placeholderTextColor="#444"
+                  placeholderTextColor={C.text3}
                 />
               </View>
 
@@ -251,15 +273,15 @@ export default function InventoryScreen() {
               <Text style={s.fieldLabel}>Condition</Text>
               <View style={s.chipRow}>
                 {GRADES.map(g => {
-                  const color = COND_COLOR[g] || '#555';
+                  const color  = COND_COLOR[g] || C.text3;
                   const active = eCondition === g;
                   return (
                     <TouchableOpacity
                       key={g}
-                      style={[s.chip, active && { borderColor: color, backgroundColor: color + '22' }]}
+                      style={[s.chip, active && { borderColor: color, backgroundColor: color + '20' }]}
                       onPress={() => setECondition(g)}
                     >
-                      <Text style={[s.chipText, active && { color }]}>{g}</Text>
+                      <Text style={[s.chipText, active && { color, fontWeight: '700' }]}>{g}</Text>
                     </TouchableOpacity>
                   );
                 })}
@@ -275,7 +297,7 @@ export default function InventoryScreen() {
                     onPress={() => setEStatus(st)}
                   >
                     <Text style={[s.chipText, eStatus === st && s.chipTextActive]}>
-                      {st.replace(/_/g, ' ')}
+                      {STATUS_LABEL[st] || st}
                     </Text>
                   </TouchableOpacity>
                 ))}
@@ -299,16 +321,28 @@ export default function InventoryScreen() {
 
               {/* Toggles */}
               <View style={s.toggleRow}>
-                <Text style={s.toggleLabel}>Signed</Text>
-                <Switch value={eSigned} onValueChange={setESigned}
-                  thumbColor={eSigned ? ACCENT : '#333'}
-                  trackColor={{ false: '#222', true: '#4a1020' }} />
+                <View>
+                  <Text style={s.toggleLabel}>Signed copy</Text>
+                  <Text style={s.toggleHint}>Author's signature present</Text>
+                </View>
+                <Switch
+                  value={eSigned}
+                  onValueChange={setESigned}
+                  thumbColor={eSigned ? C.accent : C.surface}
+                  trackColor={{ false: C.border, true: C.accentBg }}
+                />
               </View>
               <View style={[s.toggleRow, s.toggleBorder]}>
-                <Text style={s.toggleLabel}>Inscribed</Text>
-                <Switch value={eInscribed} onValueChange={setEInscribed}
-                  thumbColor={eInscribed ? ACCENT : '#333'}
-                  trackColor={{ false: '#222', true: '#4a1020' }} />
+                <View>
+                  <Text style={s.toggleLabel}>Inscribed copy</Text>
+                  <Text style={s.toggleHint}>Personalized inscription inside</Text>
+                </View>
+                <Switch
+                  value={eInscribed}
+                  onValueChange={setEInscribed}
+                  thumbColor={eInscribed ? C.accent : C.surface}
+                  trackColor={{ false: C.border, true: C.accentBg }}
+                />
               </View>
 
               {/* Actions */}
@@ -318,7 +352,7 @@ export default function InventoryScreen() {
                 disabled={saving}
               >
                 {saving
-                  ? <ActivityIndicator color="#fff" />
+                  ? <ActivityIndicator color={C.bg} />
                   : <Text style={s.saveBtnText}>Save Changes</Text>
                 }
               </TouchableOpacity>
@@ -336,89 +370,115 @@ export default function InventoryScreen() {
 }
 
 const s = StyleSheet.create({
-  container: { flex: 1, backgroundColor: BG },
+  container: { flex: 1, backgroundColor: C.bg },
 
+  // Stats
   statsRow: {
-    flexDirection: 'row', backgroundColor: '#0c0c17',
-    paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: '#1a1a2a',
+    flexDirection: 'row', backgroundColor: C.surface,
+    paddingVertical: 16, borderBottomWidth: 1, borderBottomColor: C.border,
   },
   stat: { flex: 1, alignItems: 'center' },
-  statBorder: { borderLeftWidth: 1, borderRightWidth: 1, borderColor: '#1a1a2a' },
-  statNum: { color: '#fff', fontSize: 22, fontWeight: '700' },
-  statLabel: { color: '#555', fontSize: 11, marginTop: 2, textTransform: 'uppercase', letterSpacing: 0.5 },
-
-  searchRow: {
-    flexDirection: 'row', paddingHorizontal: 12, paddingVertical: 10,
-    borderBottomWidth: 1, borderBottomColor: '#1a1a2a', alignItems: 'center',
+  statDivider: { borderLeftWidth: 1, borderRightWidth: 1, borderColor: C.border },
+  statNum: { color: C.text, fontSize: 22, fontWeight: '700' },
+  statLabel: {
+    color: C.text3, fontSize: 10, marginTop: 3,
+    textTransform: 'uppercase', letterSpacing: 0.8,
   },
-  searchWrap: {
-    flex: 1, flexDirection: 'row', alignItems: 'center',
-    backgroundColor: '#1a1a2a', borderRadius: 10,
-    paddingHorizontal: 10, borderWidth: 1, borderColor: '#252530',
-  },
-  searchIcon: { color: '#555', fontSize: 18, marginRight: 6 },
-  searchInput: { flex: 1, paddingVertical: 9, color: '#fff', fontSize: 14 },
-  clearBtn: { padding: 4 },
-  clearBtnText: { color: '#555', fontSize: 13 },
 
+  // Search
+  searchBar: {
+    flexDirection: 'row', alignItems: 'center',
+    margin: 12, paddingHorizontal: 12, paddingVertical: 10,
+    backgroundColor: C.card, borderRadius: 10,
+    borderWidth: 1, borderColor: C.border,
+  },
+  searchInput: { flex: 1, color: C.text, fontSize: 14 },
+  clearBtn: { padding: 2 },
+
+  // List items
   item: {
-    flexDirection: 'row', paddingHorizontal: 16, paddingVertical: 13,
-    borderBottomWidth: 1, borderBottomColor: '#0f0f18', alignItems: 'center',
+    flexDirection: 'row',
+    borderBottomWidth: 1, borderBottomColor: C.border,
+    backgroundColor: C.bg,
+  },
+  condStripe: { width: 3, minHeight: 70 },
+  itemBody: {
+    flex: 1, flexDirection: 'row',
+    paddingHorizontal: 14, paddingVertical: 13, alignItems: 'center',
   },
   itemMain: { flex: 1, marginRight: 12 },
-  itemTitle: { color: '#fff', fontSize: 14, fontWeight: '600' },
-  itemAuthor: { color: '#666', fontSize: 12, marginTop: 2 },
-  itemMeta: { flexDirection: 'row', gap: 8, marginTop: 3 },
-  itemSku: { color: '#333', fontSize: 10, fontFamily: 'monospace' },
-  itemSection: { color: '#2a2a4a', fontSize: 10 },
-  itemRight: { alignItems: 'flex-end', gap: 6 },
-  itemPrice: { color: ACCENT, fontSize: 16, fontWeight: '700' },
-  condBadge: { borderWidth: 1, borderRadius: 4, paddingHorizontal: 6, paddingVertical: 2 },
-  condBadgeText: { fontSize: 10, fontWeight: '600' },
+  itemTitle: { color: C.text, fontSize: 14, fontWeight: '600' },
+  itemAuthor: { color: C.text2, fontSize: 12, marginTop: 2 },
+  itemMeta: { flexDirection: 'row', gap: 8, marginTop: 5, alignItems: 'center' },
+  itemSku: { color: C.text3, fontSize: 10, fontFamily: 'monospace' },
+  sectionPill: {
+    backgroundColor: C.surface, borderRadius: 4,
+    paddingHorizontal: 6, paddingVertical: 1,
+    borderWidth: 1, borderColor: C.border,
+  },
+  sectionPillText: { color: C.text3, fontSize: 10 },
+  itemRight: { alignItems: 'flex-end', gap: 4 },
+  itemPrice: { color: C.accent, fontSize: 16, fontWeight: '700' },
+  condLabel: { fontSize: 11, fontWeight: '600' },
 
   emptyContainer: { flex: 1 },
   emptyWrap: { alignItems: 'center', marginTop: 80 },
   emptyIcon: { fontSize: 48, marginBottom: 12 },
-  emptyTitle: { color: '#fff', fontSize: 16, fontWeight: '600' },
-  emptyHint: { color: '#555', fontSize: 13, marginTop: 6 },
+  emptyTitle: { color: C.text, fontSize: 16, fontWeight: '600' },
+  emptyHint: { color: C.text2, fontSize: 13, marginTop: 6 },
 
   // Modal
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'flex-end' },
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.75)', justifyContent: 'flex-end' },
   modalSheet: {
-    backgroundColor: '#0f0f1a', borderTopLeftRadius: 20, borderTopRightRadius: 20,
-    maxHeight: '90%', borderTopWidth: 1, borderColor: '#1e1e2e',
+    backgroundColor: C.card, borderTopLeftRadius: 24, borderTopRightRadius: 24,
+    maxHeight: '92%', borderTopWidth: 1, borderColor: C.border,
   },
-  modalContent: { padding: 20, paddingBottom: 40 },
-  modalHeader: { flexDirection: 'row', alignItems: 'flex-start', marginBottom: 4 },
-  modalTitle: { flex: 1, color: '#fff', fontSize: 17, fontWeight: '700', marginRight: 12 },
-  modalClose: { padding: 4 },
-  modalCloseText: { color: '#555', fontSize: 18 },
-  modalSku: { color: '#333', fontSize: 11, fontFamily: 'monospace', marginBottom: 16 },
+  sheetHandle: {
+    width: 36, height: 4, borderRadius: 2,
+    backgroundColor: C.border, alignSelf: 'center', marginTop: 12,
+  },
+  modalContent: { padding: 20, paddingTop: 16, paddingBottom: 48 },
+  modalHeader: { flexDirection: 'row', alignItems: 'flex-start', marginBottom: 20 },
+  modalTitle:  { color: C.text, fontSize: 17, fontWeight: '700', lineHeight: 24 },
+  modalAuthor: { color: C.text2, fontSize: 13, marginTop: 3 },
+  modalSku:    { color: C.text3, fontSize: 11, fontFamily: 'monospace', marginTop: 5 },
+  modalClose:  { padding: 4, marginLeft: 12 },
 
-  fieldLabel: { color: '#555', fontSize: 12, marginTop: 16, marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.5 },
+  fieldLabel: {
+    color: C.text3, fontSize: 11, marginTop: 20, marginBottom: 8,
+    textTransform: 'uppercase', letterSpacing: 0.8,
+  },
   priceRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  dollar: { color: '#555', fontSize: 18, fontWeight: '600' },
+  dollar: { color: C.text2, fontSize: 18, fontWeight: '600' },
   input: {
-    backgroundColor: '#1a1a2a', borderWidth: 1, borderColor: '#252535',
-    borderRadius: 8, paddingHorizontal: 12, paddingVertical: 10, color: '#fff', fontSize: 14,
+    backgroundColor: C.surface, borderWidth: 1, borderColor: C.border,
+    borderRadius: 8, paddingHorizontal: 12, paddingVertical: 10,
+    color: C.text, fontSize: 14,
   },
 
   chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   chip: {
-    paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16,
-    borderWidth: 1, borderColor: '#252535', backgroundColor: CARD,
+    paddingHorizontal: 12, paddingVertical: 7, borderRadius: 16,
+    borderWidth: 1, borderColor: C.border, backgroundColor: C.surface,
   },
-  chipActive: { backgroundColor: '#1e0810', borderColor: ACCENT },
-  chipText: { color: '#666', fontSize: 12 },
-  chipTextActive: { color: '#fff', fontWeight: '600' },
+  chipActive:     { backgroundColor: C.accentBg, borderColor: C.accent },
+  chipText:       { color: C.text3, fontSize: 12 },
+  chipTextActive: { color: C.accent, fontWeight: '700' },
 
-  toggleRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 12 },
-  toggleBorder: { borderTopWidth: 1, borderTopColor: '#1a1a2a' },
-  toggleLabel: { color: '#fff', fontSize: 15 },
+  toggleRow: {
+    flexDirection: 'row', justifyContent: 'space-between',
+    alignItems: 'center', paddingVertical: 14,
+  },
+  toggleBorder: { borderTopWidth: 1, borderTopColor: C.border },
+  toggleLabel:  { color: C.text, fontSize: 15, fontWeight: '500' },
+  toggleHint:   { color: C.text3, fontSize: 11, marginTop: 2 },
 
-  saveBtn: { backgroundColor: ACCENT, padding: 16, borderRadius: 12, alignItems: 'center', marginTop: 20 },
-  saveBtnText: { color: '#fff', fontWeight: '700', fontSize: 15 },
+  saveBtn: {
+    backgroundColor: C.accent, padding: 16, borderRadius: 12,
+    alignItems: 'center', marginTop: 24,
+  },
+  saveBtnText: { color: C.bg, fontWeight: '700', fontSize: 15 },
   btnDisabled: { opacity: 0.5 },
-  deleteBtn: { alignItems: 'center', padding: 14, marginTop: 8 },
-  deleteBtnText: { color: '#e74c3c', fontSize: 14 },
+  deleteBtn:   { alignItems: 'center', padding: 14, marginTop: 4 },
+  deleteBtnText: { color: C.red, fontSize: 14 },
 });

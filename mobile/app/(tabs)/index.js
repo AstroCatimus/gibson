@@ -12,19 +12,12 @@ import {
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { router } from 'expo-router';
 import { api } from '../../src/lib/api';
-
-const GREEN  = '#2ecc71';
-const YELLOW = '#f39c12';
-const MUTED  = '#888';
-const CARD   = '#13131f';
-
-const ACCENT = '#e94560';
-const BG = '#0f0f1a';
+import { C } from '../../src/lib/theme';
 
 const PHOTO_STEPS = [
-  { key: 'cover',     label: 'Cover',          instruction: 'Point at the front cover and tap capture.' },
-  { key: 'title',     label: 'Title page',      instruction: 'Open to the title page and tap capture.' },
-  { key: 'copyright', label: 'Copyright page',  instruction: 'Flip to the copyright page (back of title page) and tap capture.' },
+  { key: 'cover',     label: 'Cover',         instruction: 'Point at the front cover and tap capture.' },
+  { key: 'title',     label: 'Title page',     instruction: 'Open to the title page and tap capture.' },
+  { key: 'copyright', label: 'Copyright page', instruction: 'Flip to the copyright page (back of title page) and tap capture.' },
 ];
 
 export default function ScanScreen() {
@@ -34,34 +27,32 @@ export default function ScanScreen() {
   const [manualIsbn, setManualIsbn] = useState('');
   const [torch, setTorch]     = useState(false);
 
-  // Multi-step photo state
-  const [photoStep, setPhotoStep]     = useState(0);
-  const [photos, setPhotos]           = useState([]);
-  const [processing, setProcessing]   = useState(false);
-  const [knownIsbn, setKnownIsbn]     = useState(null);
+  const [photoStep, setPhotoStep]   = useState(0);
+  const [photos, setPhotos]         = useState([]);
+  const [processing, setProcessing] = useState(false);
+  const [knownIsbn, setKnownIsbn]   = useState(null);
 
-  // Multi-copy picker
-  const [copyPickerResult, setCopyPickerResult] = useState(null); // full result when >1 copy
+  const [copyPickerResult, setCopyPickerResult] = useState(null);
 
-  const cameraRef      = useRef(null);
-  const scanCooldown   = useRef(false);
+  const cameraRef    = useRef(null);
+  const scanCooldown = useRef(false);
 
   if (!permission) return <View style={s.container} />;
 
   if (!permission.granted) {
     return (
       <View style={[s.container, s.center]}>
-        <Text style={s.permText}>Camera access needed to scan books.</Text>
-        <TouchableOpacity style={s.btn} onPress={requestPermission}>
-          <Text style={s.btnText}>Grant Permission</Text>
+        <Text style={s.permIcon}>📷</Text>
+        <Text style={s.permText}>Camera access is needed to scan books.</Text>
+        <TouchableOpacity style={s.permBtn} onPress={requestPermission}>
+          <Text style={s.permBtnText}>Grant Permission</Text>
         </TouchableOpacity>
       </View>
     );
   }
 
-  // ── Barcode ──────────────────────────────────────────────────
+  // ── Barcode ─────────────────────────────────────────────────────
   async function handleBarcode({ data, type }) {
-    // Only accept EAN-13 barcodes that are ISBNs (978 / 979 prefix)
     if (type !== 'ean13') return;
     if (!data.startsWith('978') && !data.startsWith('979')) return;
     if (scanCooldown.current || loading) return;
@@ -73,7 +64,6 @@ export default function ScanScreen() {
       const result = await api.scanBarcode(data);
       if (result.title) {
         if (result.copies?.length > 1) {
-          // Multiple physical copies — show picker first
           setCopyPickerResult(result);
         } else {
           router.push({ pathname: '/identify', params: { result: JSON.stringify(result) } });
@@ -92,7 +82,6 @@ export default function ScanScreen() {
   }
 
   function handleCopyPick(copy) {
-    // Inject the chosen copy's stock_item_id into the result before navigating
     const result = {
       ...copyPickerResult,
       stock_item_id: copy.stock_item_id,
@@ -106,7 +95,7 @@ export default function ScanScreen() {
     router.push({ pathname: '/identify', params: { result: JSON.stringify(result) } });
   }
 
-  // ── Multi-step photo ─────────────────────────────────────────
+  // ── Multi-step photo ─────────────────────────────────────────────
   function resetPhotoFlow() {
     setPhotoStep(0);
     setPhotos([]);
@@ -122,22 +111,13 @@ export default function ScanScreen() {
       setPhotos(next);
 
       if (next.length < PHOTO_STEPS.length) {
-        // More steps remaining
         setPhotoStep(next.length);
       } else {
-        // All 3 captured — send to API
         setProcessing(true);
         const [cover, title, copyright] = next;
-        const result = await api.identifyPhoto(
-          cover.base64,
-          [title.base64, copyright.base64],
-        );
-        // If barcode gave us an ISBN but Claude couldn't read it, carry it forward
+        const result = await api.identifyPhoto(cover.base64, [title.base64, copyright.base64]);
         if (knownIsbn && !result.isbn_13) result.isbn_13 = knownIsbn;
-        router.push({
-          pathname: '/identify',
-          params: { result: JSON.stringify(result), coverUri: cover.uri },
-        });
+        router.push({ pathname: '/identify', params: { result: JSON.stringify(result), coverUri: cover.uri } });
         resetPhotoFlow();
       }
     } catch (e) {
@@ -146,7 +126,7 @@ export default function ScanScreen() {
     }
   }
 
-  // ── Manual ISBN ──────────────────────────────────────────────
+  // ── Manual ISBN ──────────────────────────────────────────────────
   async function handleManualIsbn() {
     const isbn = manualIsbn.replace(/[^0-9X]/gi, '');
     if (isbn.length !== 13 && isbn.length !== 10) {
@@ -165,7 +145,7 @@ export default function ScanScreen() {
   }
 
   const currentStep = PHOTO_STEPS[photoStep];
-  const thumbUri    = photos[0]?.uri;  // cover thumbnail
+  const thumbUri    = photos[0]?.uri;
 
   return (
     <View style={s.container}>
@@ -178,52 +158,56 @@ export default function ScanScreen() {
         barcodeScannerSettings={{ barcodeTypes: ['ean13', 'ean8', 'upc_a', 'upc_e'] }}
       />
 
-      {/* Mode selector + torch */}
+      {/* ── Mode bar ── */}
       <View style={s.modeBar}>
-        {['barcode', 'photo', 'manual'].map((m) => (
+        {[
+          { key: 'barcode', label: 'Barcode' },
+          { key: 'photo',   label: 'Cover' },
+          { key: 'manual',  label: 'Manual' },
+        ].map(({ key, label }) => (
           <TouchableOpacity
-            key={m}
-            style={[s.modeBtn, mode === m && s.modeBtnActive]}
-            onPress={() => { setMode(m); resetPhotoFlow(); }}
+            key={key}
+            style={[s.modeBtn, mode === key && s.modeBtnActive]}
+            onPress={() => { setMode(key); resetPhotoFlow(); }}
           >
-            <Text style={[s.modeBtnText, mode === m && s.modeBtnTextActive]}>
-              {m === 'barcode' ? 'Barcode' : m === 'photo' ? 'Cover' : 'Manual'}
+            <Text style={[s.modeBtnText, mode === key && s.modeBtnTextActive]}>
+              {label}
             </Text>
           </TouchableOpacity>
         ))}
         <TouchableOpacity
-          style={[s.modeBtn, torch && s.modeBtnActive]}
+          style={[s.torchBtn, torch && s.torchBtnActive]}
           onPress={() => setTorch(t => !t)}
         >
-          <Text style={[s.modeBtnText, torch && s.modeBtnTextActive]}>⚡</Text>
+          <Text style={s.torchIcon}>⚡</Text>
         </TouchableOpacity>
       </View>
 
-      {/* Barcode frame */}
+      {/* ── Barcode crosshair ── */}
       {mode === 'barcode' && (
         <View style={s.crosshair} pointerEvents="none">
-          <View style={s.crosshairBox} />
-          <Text style={s.crosshairLabel}>ISBN barcode only (978 / 979)</Text>
+          <View style={s.crosshairCorners}>
+            <View style={s.crosshairBox} />
+          </View>
+          <Text style={s.crosshairLabel}>ISBN barcode (978 · 979)</Text>
         </View>
       )}
 
-      {/* Loading / processing overlay */}
+      {/* ── Loading overlay ── */}
       {(loading || processing) && (
         <View style={s.loadingOverlay} pointerEvents="none">
-          <ActivityIndicator color={ACCENT} size="large" />
+          <ActivityIndicator color={C.accent} size="large" />
           {processing && (
             <Text style={s.processingLabel}>Identifying with Claude Vision…</Text>
           )}
         </View>
       )}
 
-      {/* Bottom controls */}
+      {/* ── Bottom controls ── */}
       <View style={s.controls}>
 
-        {/* ── Photo multi-step ── */}
         {mode === 'photo' && !processing && (
           <>
-            {/* Barcode miss banner */}
             {knownIsbn && (
               <View style={s.isbnBanner}>
                 <Text style={s.isbnBannerText}>
@@ -232,7 +216,7 @@ export default function ScanScreen() {
               </View>
             )}
 
-            {/* Step indicators */}
+            {/* Step progress */}
             <View style={s.stepRow}>
               {PHOTO_STEPS.map((step, i) => (
                 <View key={step.key} style={s.stepItem}>
@@ -242,8 +226,8 @@ export default function ScanScreen() {
                     i === photoStep && s.stepDotActive,
                   ]}>
                     {i < photos.length
-                      ? <Text style={s.stepDotCheck}>✓</Text>
-                      : <Text style={[s.stepDotNum, i === photoStep && { color: '#fff' }]}>{i + 1}</Text>
+                      ? <Text style={s.stepCheck}>✓</Text>
+                      : <Text style={[s.stepNum, i === photoStep && { color: C.text }]}>{i + 1}</Text>
                     }
                   </View>
                   <Text style={[s.stepLabel, i === photoStep && s.stepLabelActive]}>
@@ -253,7 +237,7 @@ export default function ScanScreen() {
               ))}
             </View>
 
-            {/* Cover thumbnail + instructions */}
+            {/* Instruction row */}
             <View style={s.photoRow}>
               {thumbUri ? (
                 <Image source={{ uri: thumbUri }} style={s.thumb} />
@@ -265,23 +249,19 @@ export default function ScanScreen() {
 
             <TouchableOpacity style={s.captureBtn} onPress={capturePhoto}>
               <Text style={s.captureBtnText}>
-                {photoStep === 0 ? 'Take Cover Photo'
-                  : photoStep === 1 ? 'Take Title Page'
-                  : 'Take Copyright Page'}
+                {photoStep === 0 ? '📷  Take Cover Photo'
+                  : photoStep === 1 ? '📷  Take Title Page'
+                  : '📷  Take Copyright Page'}
               </Text>
             </TouchableOpacity>
 
             {photoStep > 0 && (
               <TouchableOpacity style={s.skipBtn} onPress={async () => {
-                // Allow skipping remaining steps — send what we have
                 setProcessing(true);
                 try {
                   const [cover, ...rest] = photos;
                   const result = await api.identifyPhoto(cover.base64, rest.map(p => p.base64));
-                  router.push({
-                    pathname: '/identify',
-                    params: { result: JSON.stringify(result), coverUri: cover.uri },
-                  });
+                  router.push({ pathname: '/identify', params: { result: JSON.stringify(result), coverUri: cover.uri } });
                   resetPhotoFlow();
                 } catch (e) {
                   Alert.alert('Error', e.message);
@@ -294,15 +274,14 @@ export default function ScanScreen() {
           </>
         )}
 
-        {/* ── Manual ISBN ── */}
         {mode === 'manual' && (
           <View style={s.manualRow}>
             <TextInput
               style={s.isbnInput}
               value={manualIsbn}
               onChangeText={setManualIsbn}
-              placeholder="ISBN (10 or 13 digits)"
-              placeholderTextColor="#555"
+              placeholder="ISBN — 10 or 13 digits"
+              placeholderTextColor={C.text3}
               keyboardType="numeric"
               maxLength={17}
             />
@@ -312,8 +291,8 @@ export default function ScanScreen() {
               disabled={loading}
             >
               {loading
-                ? <ActivityIndicator color="#fff" size="small" />
-                : <Text style={s.btnText}>Look Up</Text>
+                ? <ActivityIndicator color={C.bg} size="small" />
+                : <Text style={s.lookupBtnText}>Look Up</Text>
               }
             </TouchableOpacity>
           </View>
@@ -322,10 +301,9 @@ export default function ScanScreen() {
         {mode === 'barcode' && (
           <Text style={s.hint}>Scanning automatically…</Text>
         )}
-
       </View>
 
-      {/* ── Multi-copy picker modal ───────────────────────── */}
+      {/* ── Multi-copy picker ── */}
       <Modal
         visible={!!copyPickerResult}
         transparent
@@ -334,16 +312,18 @@ export default function ScanScreen() {
       >
         <View style={cp.overlay}>
           <View style={cp.sheet}>
+            <View style={cp.handle} />
             <Text style={cp.title}>{copyPickerResult?.title}</Text>
             <Text style={cp.sub}>
               {copyPickerResult?.copies?.length} copies in stock — which one are you holding?
             </Text>
-            <ScrollView style={{ maxHeight: 360 }}>
+            <ScrollView style={{ maxHeight: 360 }} showsVerticalScrollIndicator={false}>
               {(copyPickerResult?.copies || []).map((copy) => (
                 <TouchableOpacity
                   key={copy.stock_item_id}
                   style={cp.copyRow}
                   onPress={() => handleCopyPick(copy)}
+                  activeOpacity={0.75}
                 >
                   <View style={cp.copyLeft}>
                     <Text style={cp.skuText}>{copy.gibson_sku}</Text>
@@ -365,116 +345,143 @@ export default function ScanScreen() {
           </View>
         </View>
       </Modal>
-
     </View>
   );
 }
 
 const cp = StyleSheet.create({
-  overlay: {
-    flex: 1, backgroundColor: 'rgba(0,0,0,0.7)',
-    justifyContent: 'flex-end',
-  },
+  overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.75)', justifyContent: 'flex-end' },
   sheet: {
-    backgroundColor: CARD, borderTopLeftRadius: 20, borderTopRightRadius: 20,
-    padding: 24, paddingBottom: 40,
+    backgroundColor: C.card, borderTopLeftRadius: 24, borderTopRightRadius: 24,
+    padding: 24, paddingBottom: 40, borderTopWidth: 1, borderColor: C.border,
   },
-  title:   { color: '#fff', fontSize: 17, fontWeight: '700', marginBottom: 4 },
-  sub:     { color: MUTED, fontSize: 13, marginBottom: 16 },
+  handle: {
+    width: 36, height: 4, borderRadius: 2,
+    backgroundColor: C.border, alignSelf: 'center', marginBottom: 20,
+  },
+  title:  { color: C.text, fontSize: 16, fontWeight: '700', marginBottom: 4 },
+  sub:    { color: C.text2, fontSize: 13, marginBottom: 16 },
   copyRow: {
     flexDirection: 'row', alignItems: 'center',
-    backgroundColor: '#1e1e2e', borderRadius: 12,
-    padding: 14, marginBottom: 10,
+    backgroundColor: C.surface, borderRadius: 12,
+    padding: 14, marginBottom: 8,
+    borderWidth: 1, borderColor: C.border,
   },
   copyLeft:    { flex: 1 },
   copyRight:   { alignItems: 'flex-end', marginRight: 12 },
-  skuText:     { color: '#fff', fontWeight: '700', fontSize: 14 },
-  sectionText: { color: MUTED, fontSize: 12, marginTop: 2 },
-  condText:    { color: GREEN, fontSize: 13, fontWeight: '600' },
-  priceText:   { color: YELLOW, fontSize: 13, marginTop: 2 },
-  arrow:       { color: MUTED, fontSize: 20 },
-  cancelBtn:   { marginTop: 8, alignItems: 'center', padding: 12 },
-  cancelTxt:   { color: MUTED, fontSize: 15 },
+  skuText:     { color: C.text, fontWeight: '700', fontSize: 14, fontFamily: 'monospace' },
+  sectionText: { color: C.text2, fontSize: 12, marginTop: 2 },
+  condText:    { color: C.green, fontSize: 13, fontWeight: '600' },
+  priceText:   { color: C.accent, fontSize: 13, fontWeight: '700', marginTop: 2 },
+  arrow:       { color: C.text3, fontSize: 20 },
+  cancelBtn:   { marginTop: 10, alignItems: 'center', padding: 12 },
+  cancelTxt:   { color: C.text2, fontSize: 15 },
 });
 
 const s = StyleSheet.create({
-  container: { flex: 1, backgroundColor: BG },
-  center: { alignItems: 'center', justifyContent: 'center' },
-  permText: { color: '#fff', textAlign: 'center', margin: 20, fontSize: 15 },
+  container: { flex: 1, backgroundColor: C.bg },
+  center:    { alignItems: 'center', justifyContent: 'center', padding: 32 },
+  permIcon:  { fontSize: 48, marginBottom: 16 },
+  permText:  { color: C.text2, textAlign: 'center', fontSize: 15, lineHeight: 22, marginBottom: 24 },
+  permBtn:   { backgroundColor: C.accent, paddingVertical: 14, paddingHorizontal: 32, borderRadius: 12 },
+  permBtnText: { color: C.bg, fontWeight: '700', fontSize: 15 },
 
+  // Mode selector
   modeBar: {
     position: 'absolute', top: 56, left: 0, right: 0,
-    flexDirection: 'row', justifyContent: 'center', gap: 8, paddingHorizontal: 16,
+    flexDirection: 'row', justifyContent: 'center', gap: 8, paddingHorizontal: 20,
   },
   modeBtn: {
-    paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20,
-    borderWidth: 1, borderColor: 'rgba(255,255,255,0.25)',
-    backgroundColor: 'rgba(0,0,0,0.5)',
+    paddingHorizontal: 18, paddingVertical: 9, borderRadius: 20,
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.2)',
+    backgroundColor: 'rgba(19,17,14,0.75)',
   },
-  modeBtnActive: { backgroundColor: ACCENT, borderColor: ACCENT },
-  modeBtnText: { color: 'rgba(255,255,255,0.65)', fontSize: 13 },
-  modeBtnTextActive: { color: '#fff', fontWeight: '600' },
+  modeBtnActive: { backgroundColor: C.accent, borderColor: C.accent },
+  modeBtnText: { color: 'rgba(255,255,255,0.6)', fontSize: 13, fontWeight: '500' },
+  modeBtnTextActive: { color: C.bg, fontWeight: '700' },
+  torchBtn: {
+    paddingHorizontal: 14, paddingVertical: 9, borderRadius: 20,
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.2)',
+    backgroundColor: 'rgba(19,17,14,0.75)',
+  },
+  torchBtnActive: { backgroundColor: C.yellow, borderColor: C.yellow },
+  torchIcon: { fontSize: 15 },
 
+  // Crosshair
   crosshair: {
     position: 'absolute', top: 0, left: 0, right: 0, bottom: 100,
     alignItems: 'center', justifyContent: 'center',
   },
-  crosshairBox: { width: 260, height: 110, borderWidth: 2, borderColor: ACCENT, borderRadius: 8 },
-  crosshairLabel: { color: '#fff', marginTop: 10, opacity: 0.75, fontSize: 12 },
+  crosshairCorners: { position: 'relative' },
+  crosshairBox: {
+    width: 270, height: 115,
+    borderWidth: 2, borderColor: C.accent,
+    borderRadius: 10, opacity: 0.9,
+  },
+  crosshairLabel: { color: 'rgba(255,255,255,0.7)', marginTop: 12, fontSize: 12, letterSpacing: 0.3 },
 
+  // Loading overlay
   loadingOverlay: {
     position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
-    backgroundColor: 'rgba(0,0,0,0.55)', alignItems: 'center', justifyContent: 'center', gap: 12,
+    backgroundColor: 'rgba(19,17,14,0.65)', alignItems: 'center', justifyContent: 'center', gap: 14,
   },
-  processingLabel: { color: '#fff', fontSize: 14, opacity: 0.9 },
+  processingLabel: { color: C.text, fontSize: 14, opacity: 0.9, letterSpacing: 0.2 },
 
+  // Bottom controls panel
   controls: {
     position: 'absolute', bottom: 0, left: 0, right: 0,
-    backgroundColor: 'rgba(13,13,25,0.95)', padding: 16, paddingBottom: 36,
-    gap: 12,
+    backgroundColor: 'rgba(19,17,14,0.96)',
+    borderTopWidth: 1, borderTopColor: C.border,
+    padding: 16, paddingBottom: 36, gap: 12,
   },
 
   // Step indicators
-  stepRow: { flexDirection: 'row', justifyContent: 'center', gap: 24, marginBottom: 4 },
-  stepItem: { alignItems: 'center', gap: 4 },
+  stepRow: { flexDirection: 'row', justifyContent: 'center', gap: 28, marginBottom: 2 },
+  stepItem: { alignItems: 'center', gap: 5 },
   stepDot: {
-    width: 28, height: 28, borderRadius: 14,
-    borderWidth: 1, borderColor: '#333',
-    backgroundColor: '#1a1a2a', alignItems: 'center', justifyContent: 'center',
+    width: 30, height: 30, borderRadius: 15,
+    borderWidth: 1.5, borderColor: C.text3,
+    backgroundColor: C.surface, alignItems: 'center', justifyContent: 'center',
   },
-  stepDotActive: { borderColor: ACCENT, backgroundColor: '#2a0d1a' },
-  stepDotDone: { borderColor: '#2ecc71', backgroundColor: '#0d2a15' },
-  stepDotNum: { color: '#555', fontSize: 12, fontWeight: '700' },
-  stepDotCheck: { color: '#2ecc71', fontSize: 12, fontWeight: '700' },
-  stepLabel: { color: '#555', fontSize: 10 },
-  stepLabelActive: { color: '#fff' },
+  stepDotActive: { borderColor: C.accent, backgroundColor: C.accentBg },
+  stepDotDone:   { borderColor: C.green,  backgroundColor: C.greenBg },
+  stepNum:   { color: C.text3, fontSize: 12, fontWeight: '700' },
+  stepCheck: { color: C.green, fontSize: 12, fontWeight: '700' },
+  stepLabel: { color: C.text3, fontSize: 10, letterSpacing: 0.2 },
+  stepLabelActive: { color: C.text },
 
   // Photo controls
-  photoRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  thumb: { width: 44, height: 60, borderRadius: 4, borderWidth: 1, borderColor: '#333' },
-  instruction: { color: '#aaa', fontSize: 13, lineHeight: 18, textAlign: 'center' },
+  photoRow:    { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  thumb:       { width: 44, height: 60, borderRadius: 6, borderWidth: 1, borderColor: C.border },
+  instruction: { color: C.text2, fontSize: 13, lineHeight: 19, textAlign: 'center' },
 
-  captureBtn: { backgroundColor: ACCENT, padding: 15, borderRadius: 12, alignItems: 'center' },
-  captureBtnText: { color: '#fff', fontSize: 15, fontWeight: '700' },
+  captureBtn: {
+    backgroundColor: C.accent, padding: 15, borderRadius: 12,
+    alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 8,
+  },
+  captureBtnText: { color: C.bg, fontSize: 15, fontWeight: '700' },
 
-  skipBtn: { alignItems: 'center', paddingVertical: 4 },
-  skipBtnText: { color: '#555', fontSize: 13 },
+  skipBtn:     { alignItems: 'center', paddingVertical: 4 },
+  skipBtnText: { color: C.text3, fontSize: 13 },
 
-  // Manual
+  // Manual entry
   manualRow: { flexDirection: 'row', gap: 10 },
   isbnInput: {
-    flex: 1, backgroundColor: '#1e1e2e', borderWidth: 1, borderColor: '#333',
-    borderRadius: 10, padding: 12, color: '#fff', fontSize: 15,
+    flex: 1, backgroundColor: C.card, borderWidth: 1, borderColor: C.border,
+    borderRadius: 10, padding: 13, color: C.text, fontSize: 15,
   },
-  lookupBtn: { backgroundColor: ACCENT, padding: 12, borderRadius: 10, justifyContent: 'center' },
-  btn: { backgroundColor: ACCENT, padding: 14, borderRadius: 10, alignItems: 'center', marginTop: 12 },
-  btnDisabled: { opacity: 0.5 },
-  btnText: { color: '#fff', fontWeight: '600' },
-  hint: { color: 'rgba(255,255,255,0.45)', textAlign: 'center', fontSize: 13 },
+  lookupBtn: {
+    backgroundColor: C.accent, paddingHorizontal: 18,
+    borderRadius: 10, justifyContent: 'center',
+  },
+  lookupBtnText: { color: C.bg, fontWeight: '700', fontSize: 14 },
+  btnDisabled:   { opacity: 0.5 },
+
+  hint: { color: 'rgba(255,255,255,0.35)', textAlign: 'center', fontSize: 13 },
 
   isbnBanner: {
-    backgroundColor: '#1a1a10', borderWidth: 1, borderColor: '#3a3a10',
-    borderRadius: 8, paddingHorizontal: 12, paddingVertical: 7,
+    backgroundColor: C.surface, borderWidth: 1, borderColor: C.border,
+    borderRadius: 8, paddingHorizontal: 12, paddingVertical: 8,
   },
-  isbnBannerText: { color: '#aaa', fontSize: 12, textAlign: 'center' },
+  isbnBannerText: { color: C.text2, fontSize: 12, textAlign: 'center' },
 });

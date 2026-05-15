@@ -1,41 +1,38 @@
 /**
- * Gibson — Research Screen.
- * Correction review queue, ghost books.
+ * Gibson — Review Queue Screen.
+ * Correction review queue and ghost books.
  */
 
 import { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator } from 'react-native';
+import {
+  View, Text, StyleSheet, FlatList,
+  TouchableOpacity, ActivityIndicator,
+} from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { api } from '../../src/lib/api';
-
-const ACCENT = '#e94560';
-const BG = '#0f0f1a';
-const CARD = '#13131f';
+import { C } from '../../src/lib/theme';
 
 const CONCERN = {
-  HIGH:   { bg: '#2d0f0f', border: '#e74c3c', text: '#e74c3c', label: 'HIGH' },
-  MEDIUM: { bg: '#2d1e0a', border: '#f39c12', text: '#f39c12', label: 'MED' },
-  LOW:    { bg: '#0d2a15', border: '#2ecc71', text: '#2ecc71', label: 'LOW' },
+  HIGH:   { bg: C.redBg,    border: C.red,    text: C.red,    label: 'High' },
+  MEDIUM: { bg: C.yellowBg, border: C.yellow, text: C.yellow, label: 'Med' },
+  LOW:    { bg: C.greenBg,  border: C.green,  text: C.green,  label: 'Low' },
 };
 
-const GHOST_STATUS_COLOR = {
-  pending:      '#555',
-  researching:  '#3498db',
-  resolved:     '#2ecc71',
-  unresolvable: '#e74c3c',
+const GHOST_STATUS = {
+  pending:      { color: C.text3,  label: 'Pending' },
+  researching:  { color: C.blue,   label: 'Researching' },
+  resolved:     { color: C.green,  label: 'Resolved' },
+  unresolvable: { color: C.red,    label: 'Unresolvable' },
 };
 
-function ConcernPill({ level }) {
-  const c = CONCERN[level] || CONCERN.LOW;
-  return (
-    <View style={[s.pill, { backgroundColor: c.bg, borderColor: c.border }]}>
-      <Text style={[s.pillText, { color: c.text }]}>{c.label}</Text>
-    </View>
-  );
-}
+const TABS = [
+  { key: 'corrections', label: 'Corrections', icon: 'git-compare-outline' },
+  { key: 'ghostbook',   label: 'Ghost Books',  icon: 'help-circle-outline' },
+];
 
 export default function ResearchScreen() {
-  const [tab, setTab] = useState('corrections');
-  const [items, setItems] = useState([]);
+  const [tab, setTab]       = useState('corrections');
+  const [items, setItems]   = useState([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => { loadTab(tab); }, [tab]);
@@ -59,24 +56,32 @@ export default function ResearchScreen() {
 
   return (
     <View style={s.container}>
-      {/* Tabs */}
+
+      {/* ── Tab switcher ── */}
       <View style={s.tabBar}>
-        {[
-          { key: 'corrections', label: 'Corrections' },
-          { key: 'ghostbook',   label: 'Ghost Books' },
-        ].map(({ key, label }) => (
-          <TouchableOpacity
-            key={key}
-            style={[s.tab, tab === key && s.tabActive]}
-            onPress={() => setTab(key)}
-          >
-            <Text style={[s.tabText, tab === key && s.tabTextActive]}>{label}</Text>
-          </TouchableOpacity>
-        ))}
+        {TABS.map(({ key, label, icon }) => {
+          const active = tab === key;
+          return (
+            <TouchableOpacity
+              key={key}
+              style={[s.tab, active && s.tabActive]}
+              onPress={() => setTab(key)}
+              activeOpacity={0.7}
+            >
+              <Ionicons
+                name={icon}
+                size={15}
+                color={active ? C.accent : C.text3}
+                style={{ marginRight: 6 }}
+              />
+              <Text style={[s.tabText, active && s.tabTextActive]}>{label}</Text>
+            </TouchableOpacity>
+          );
+        })}
       </View>
 
       {loading
-        ? <ActivityIndicator color={ACCENT} style={{ marginTop: 40 }} />
+        ? <ActivityIndicator color={C.accent} style={{ marginTop: 48 }} />
         : (
           <FlatList
             data={items}
@@ -106,19 +111,27 @@ export default function ResearchScreen() {
 }
 
 function CorrectionCard({ item }) {
+  const c = CONCERN[item.concern_level] || CONCERN.LOW;
   return (
     <View style={s.card}>
       <View style={s.cardHeader}>
-        <ConcernPill level={item.concern_level} />
+        <View style={[s.pill, { backgroundColor: c.bg, borderColor: c.border }]}>
+          <Text style={[s.pillText, { color: c.text }]}>{c.label}</Text>
+        </View>
         <Text style={s.fieldName}>{item.field_name}</Text>
-        <Text style={s.timestamp}>{item.created_at ? new Date(item.created_at).toLocaleDateString() : ''}</Text>
+        <Text style={s.timestamp}>
+          {item.created_at ? new Date(item.created_at).toLocaleDateString() : ''}
+        </Text>
       </View>
+
       <View style={s.changeBlock}>
         <View style={s.changeLine}>
           <Text style={s.changeDir}>Was</Text>
           <Text style={s.originalVal} numberOfLines={2}>{item.original_value || '—'}</Text>
         </View>
-        <View style={s.changeArrow}><Text style={s.changeArrowText}>↓</Text></View>
+        <View style={s.changeArrowRow}>
+          <Ionicons name="arrow-down" size={12} color={C.text3} style={{ marginLeft: 32 }} />
+        </View>
         <View style={s.changeLine}>
           <Text style={s.changeDir}>Now</Text>
           <Text style={s.correctedVal} numberOfLines={2}>{item.corrected_value || '—'}</Text>
@@ -129,81 +142,76 @@ function CorrectionCard({ item }) {
 }
 
 function GhostCard({ item }) {
-  const statusColor = GHOST_STATUS_COLOR[item.research_status] || '#555';
+  const gs = GHOST_STATUS[item.research_status] || GHOST_STATUS.pending;
   return (
     <View style={s.card}>
       <View style={s.cardHeader}>
-        <View style={[s.statusPill, { borderColor: statusColor }]}>
-          <Text style={[s.statusText, { color: statusColor }]}>
-            {item.research_status || 'pending'}
-          </Text>
+        <View style={[s.pill, { borderColor: gs.color, backgroundColor: gs.color + '18' }]}>
+          <Text style={[s.pillText, { color: gs.color }]}>{gs.label}</Text>
         </View>
       </View>
       <Text style={s.ghostTitle} numberOfLines={2}>
         {item.physical_description || 'Unknown physical description'}
       </Text>
-      {item.notes && <Text style={s.ghostNotes} numberOfLines={2}>{item.notes}</Text>}
+      {item.notes ? (
+        <Text style={s.ghostNotes} numberOfLines={2}>{item.notes}</Text>
+      ) : null}
     </View>
   );
 }
 
 const s = StyleSheet.create({
-  container: { flex: 1, backgroundColor: BG },
+  container: { flex: 1, backgroundColor: C.bg },
 
+  // Tab bar
   tabBar: {
-    flexDirection: 'row',
-    borderBottomWidth: 1,
-    borderBottomColor: '#1a1a2a',
-    backgroundColor: '#0c0c17',
+    flexDirection: 'row', backgroundColor: C.surface,
+    borderBottomWidth: 1, borderBottomColor: C.border,
+    paddingHorizontal: 8,
   },
-  tab: { flex: 1, paddingVertical: 14, alignItems: 'center' },
-  tabActive: { borderBottomWidth: 2, borderBottomColor: ACCENT },
-  tabText: { color: '#444', fontSize: 13, fontWeight: '600' },
-  tabTextActive: { color: '#fff' },
+  tab: {
+    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+    paddingVertical: 14, gap: 4, borderBottomWidth: 2, borderBottomColor: 'transparent',
+  },
+  tabActive:     { borderBottomColor: C.accent },
+  tabText:       { color: C.text3, fontSize: 13, fontWeight: '600' },
+  tabTextActive: { color: C.text },
 
+  // Empty state
   emptyContainer: { flex: 1 },
-  emptyWrap: { alignItems: 'center', marginTop: 70 },
-  emptyIcon: { fontSize: 48, marginBottom: 12 },
-  emptyTitle: { color: '#fff', fontSize: 16, fontWeight: '600' },
-  emptyHint: { color: '#555', fontSize: 13, marginTop: 6, textAlign: 'center' },
+  emptyWrap: { alignItems: 'center', marginTop: 72, paddingHorizontal: 40 },
+  emptyIcon:  { fontSize: 48, marginBottom: 12 },
+  emptyTitle: { color: C.text, fontSize: 16, fontWeight: '600' },
+  emptyHint:  { color: C.text2, fontSize: 13, marginTop: 6, textAlign: 'center', lineHeight: 20 },
 
+  // Cards
   card: {
-    backgroundColor: CARD,
-    borderRadius: 10,
-    padding: 14,
-    marginBottom: 10,
-    borderWidth: 1,
-    borderColor: '#1e1e2e',
+    backgroundColor: C.card, borderRadius: 12,
+    padding: 14, marginBottom: 10,
+    borderWidth: 1, borderColor: C.border,
   },
   cardHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginBottom: 10,
+    flexDirection: 'row', alignItems: 'center',
+    gap: 8, marginBottom: 12,
   },
-  fieldName: { flex: 1, color: '#888', fontSize: 12 },
-  timestamp: { color: '#333', fontSize: 11 },
+  fieldName:  { flex: 1, color: C.text2, fontSize: 12 },
+  timestamp:  { color: C.text3, fontSize: 11 },
 
   pill: {
     paddingHorizontal: 8, paddingVertical: 3,
     borderRadius: 6, borderWidth: 1,
   },
-  pillText: { fontSize: 10, fontWeight: '800', letterSpacing: 0.5 },
+  pillText: { fontSize: 10, fontWeight: '700', letterSpacing: 0.4 },
 
-  changeBlock: { gap: 4 },
-  changeLine: { flexDirection: 'row', alignItems: 'flex-start', gap: 8 },
-  changeDir: { color: '#555', fontSize: 11, width: 28, paddingTop: 1 },
-  changeArrow: { paddingLeft: 28 },
-  changeArrowText: { color: '#333', fontSize: 12 },
-  originalVal: { flex: 1, color: '#777', fontSize: 13 },
-  correctedVal: { flex: 1, color: '#fff', fontSize: 13, fontWeight: '600' },
+  // Correction card
+  changeBlock: { gap: 2 },
+  changeLine:  { flexDirection: 'row', alignItems: 'flex-start', gap: 8 },
+  changeArrowRow: { paddingVertical: 2 },
+  changeDir:   { color: C.text3, fontSize: 11, width: 28, paddingTop: 1 },
+  originalVal: { flex: 1, color: C.text2, fontSize: 13 },
+  correctedVal:{ flex: 1, color: C.text, fontSize: 13, fontWeight: '600' },
 
-  statusPill: {
-    paddingHorizontal: 8, paddingVertical: 3,
-    borderRadius: 6, borderWidth: 1,
-  },
-  statusText: { fontSize: 10, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5 },
-
-  ghostTitle: { color: '#fff', fontSize: 14, fontWeight: '600' },
-  ghostNotes: { color: '#666', fontSize: 12, marginTop: 6 },
+  // Ghost card
+  ghostTitle: { color: C.text, fontSize: 14, fontWeight: '600' },
+  ghostNotes: { color: C.text2, fontSize: 12, marginTop: 6, lineHeight: 18 },
 });

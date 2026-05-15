@@ -1,12 +1,6 @@
 /**
- * Gibson — Settings Screen.
+ * Gibson — Account & Settings Screen.
  * Account info, store management (join / create / approve members), sign out.
- *
- * Store system:
- *  - Users belong to one or more stores via gibson_store_member
- *  - Joining requires an invite code + owner/admin approval
- *  - Creating a store makes you the owner (you get the invite code to share)
- *  - Owners/admins see a pending requests badge and can approve/deny
  */
 
 import { useState, useEffect, useCallback } from 'react';
@@ -14,19 +8,13 @@ import {
   View, Text, StyleSheet, TouchableOpacity, Alert,
   ScrollView, ActivityIndicator, TextInput, Modal, FlatList,
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { api } from '../../src/lib/api';
 import { supabase } from '../../src/lib/supabase';
 import { logger } from '../../src/lib/logger';
+import { C } from '../../src/lib/theme';
 
-const ACCENT  = '#e94560';
-const BG      = '#0f0f1a';
-const CARD    = '#13131f';
-const GREEN   = '#2ecc71';
-const YELLOW  = '#f39c12';
-const BLUE    = '#3498db';
-const SURFACE = '#1a1a2a';
-
-// ─── Small helpers ──────────────────────────────────────────────
+// ─── Small helpers ────────────────────────────────────────────────
 
 function SectionLabel({ children }) {
   return <Text style={s.sectionLabel}>{children}</Text>;
@@ -36,20 +24,19 @@ function Divider() {
   return <View style={s.divider} />;
 }
 
-// ─── Main screen ────────────────────────────────────────────────
+// ─── Main screen ─────────────────────────────────────────────────
 
 export default function SettingsScreen() {
-  const [user, setUser]             = useState(null);
-  const [myStores, setMyStores]     = useState([]);
+  const [user, setUser]                   = useState(null);
+  const [myStores, setMyStores]           = useState([]);
   const [activeStoreId, setActiveStoreId] = useState('');
   const [loadingStores, setLoadingStores] = useState(true);
-  const [apiStatus, setApiStatus]   = useState(null);
-  const [checking, setChecking]     = useState(false);
+  const [apiStatus, setApiStatus]         = useState(null);
+  const [checking, setChecking]           = useState(false);
 
-  // Modal visibility
-  const [showJoin, setShowJoin]     = useState(false);
-  const [showCreate, setShowCreate] = useState(false);
-  const [showRequests, setShowRequests] = useState(null); // store_id or null
+  const [showJoin, setShowJoin]         = useState(false);
+  const [showCreate, setShowCreate]     = useState(false);
+  const [showRequests, setShowRequests] = useState(null);
   const [showLogs, setShowLogs]         = useState(false);
 
   useEffect(() => {
@@ -109,9 +96,8 @@ export default function SettingsScreen() {
   return (
     <ScrollView style={s.container} contentContainerStyle={s.content}>
 
-      {/* ── Account ── */}
+      {/* ── Account card ── */}
       <View style={s.card}>
-        <Text style={s.cardLabel}>Account</Text>
         <View style={s.accountRow}>
           <View style={s.avatar}>
             <Text style={s.avatarText}>{initials}</Text>
@@ -121,19 +107,21 @@ export default function SettingsScreen() {
             <Text style={s.accountEmail}>{user?.email || ''}</Text>
           </View>
         </View>
-        <TouchableOpacity style={s.signOutBtn} onPress={handleSignOut}>
+        <Divider />
+        <TouchableOpacity style={s.signOutRow} onPress={handleSignOut}>
+          <Ionicons name="log-out-outline" size={18} color={C.red} />
           <Text style={s.signOutText}>Sign Out</Text>
         </TouchableOpacity>
       </View>
 
-      {/* ── My Stores ── */}
+      {/* ── Stores ── */}
       <SectionLabel>Your Stores</SectionLabel>
       <View style={s.card}>
         {loadingStores ? (
-          <ActivityIndicator color={ACCENT} style={{ margin: 16 }} />
+          <ActivityIndicator color={C.accent} style={{ margin: 20 }} />
         ) : myStores.length === 0 ? (
-          <View style={s.noStoresWrap}>
-            <Text style={s.noStoresText}>You haven't joined any stores yet.</Text>
+          <View style={s.emptyStores}>
+            <Text style={s.emptyStoresText}>You haven't joined any stores yet.</Text>
           </View>
         ) : (
           myStores.map((store, idx) => {
@@ -146,13 +134,13 @@ export default function SettingsScreen() {
                 <TouchableOpacity
                   style={[s.storeRow, active && s.storeRowActive]}
                   onPress={() => switchStore(store.store_id)}
+                  activeOpacity={0.7}
                 >
                   <View style={[s.storePrefix, active && s.storePrefixActive]}>
                     <Text style={[s.storePrefixText, active && s.storePrefixTextActive]}>
                       {store.prefix}
                     </Text>
                   </View>
-
                   <View style={{ flex: 1 }}>
                     <Text style={[s.storeName, active && s.storeNameActive]}>
                       {store.name}
@@ -166,9 +154,8 @@ export default function SettingsScreen() {
                       ) : null}
                     </View>
                   </View>
-
                   <View style={s.storeRight}>
-                    {active && <Text style={s.storeCheck}>✓</Text>}
+                    {active && <Ionicons name="checkmark-circle" size={20} color={C.accent} />}
                     {isAdmin && pending > 0 && (
                       <TouchableOpacity
                         style={s.pendingBadge}
@@ -180,19 +167,14 @@ export default function SettingsScreen() {
                   </View>
                 </TouchableOpacity>
 
-                {/* Invite code — only visible to owner/admin */}
                 {isAdmin && store.invite_code && (
                   <View style={s.inviteRow}>
+                    <Ionicons name="key-outline" size={13} color={C.text3} />
                     <Text style={s.inviteLabel}>Invite code</Text>
                     <Text style={s.inviteCode}>{store.invite_code}</Text>
                     {isAdmin && pending > 0 && (
-                      <TouchableOpacity
-                        style={s.reviewBtn}
-                        onPress={() => setShowRequests(store.store_id)}
-                      >
-                        <Text style={s.reviewBtnText}>
-                          {pending} pending →
-                        </Text>
+                      <TouchableOpacity style={{ marginLeft: 'auto' }} onPress={() => setShowRequests(store.store_id)}>
+                        <Text style={s.reviewBtnText}>{pending} pending →</Text>
                       </TouchableOpacity>
                     )}
                   </View>
@@ -203,29 +185,33 @@ export default function SettingsScreen() {
         )}
       </View>
 
-      {/* ── Join / Create ── */}
+      {/* ── Find a store ── */}
       <SectionLabel>Find a Store</SectionLabel>
       <View style={s.card}>
         <TouchableOpacity style={s.actionRow} onPress={() => setShowJoin(true)}>
-          <View style={s.actionIcon}><Text style={s.actionIconText}>🔑</Text></View>
+          <View style={s.actionIcon}>
+            <Ionicons name="key-outline" size={18} color={C.accent} />
+          </View>
           <View style={{ flex: 1 }}>
             <Text style={s.actionTitle}>Join with Invite Code</Text>
-            <Text style={s.actionHint}>Enter the 6-character code from your store owner</Text>
+            <Text style={s.actionHint}>Enter the code from your store owner</Text>
           </View>
-          <Text style={s.actionChevron}>›</Text>
+          <Ionicons name="chevron-forward" size={16} color={C.text3} />
         </TouchableOpacity>
         <Divider />
         <TouchableOpacity style={s.actionRow} onPress={() => setShowCreate(true)}>
-          <View style={s.actionIcon}><Text style={s.actionIconText}>🏪</Text></View>
+          <View style={s.actionIcon}>
+            <Ionicons name="storefront-outline" size={18} color={C.accent} />
+          </View>
           <View style={{ flex: 1 }}>
             <Text style={s.actionTitle}>Create a Store</Text>
             <Text style={s.actionHint}>Start a new store — you'll be the owner</Text>
           </View>
-          <Text style={s.actionChevron}>›</Text>
+          <Ionicons name="chevron-forward" size={16} color={C.text3} />
         </TouchableOpacity>
       </View>
 
-      {/* ── API status ── */}
+      {/* ── Connection ── */}
       <SectionLabel>Connection</SectionLabel>
       <View style={s.card}>
         <View style={s.statusRow}>
@@ -234,32 +220,42 @@ export default function SettingsScreen() {
             <Text style={s.apiUrl}>{process.env.EXPO_PUBLIC_API_BASE_URL}</Text>
           </View>
           {checking
-            ? <ActivityIndicator color={ACCENT} size="small" />
+            ? <ActivityIndicator color={C.accent} size="small" />
             : (
-              <View style={[s.statusBadge, { borderColor: apiStatus === 'ok' ? GREEN : '#e74c3c' }]}>
-                <View style={[s.statusDot, { backgroundColor: apiStatus === 'ok' ? GREEN : '#e74c3c' }]} />
-                <Text style={[s.statusText, { color: apiStatus === 'ok' ? GREEN : '#e74c3c' }]}>
+              <View style={[s.statusBadge, {
+                borderColor: apiStatus === 'ok' ? C.green : C.red,
+              }]}>
+                <View style={[s.statusDot, {
+                  backgroundColor: apiStatus === 'ok' ? C.green : C.red,
+                }]} />
+                <Text style={[s.statusText, {
+                  color: apiStatus === 'ok' ? C.green : C.red,
+                }]}>
                   {apiStatus === 'ok' ? 'Online' : 'Offline'}
                 </Text>
               </View>
             )
           }
         </View>
-        <TouchableOpacity onPress={checkApi} style={s.retryBtn}>
-          <Text style={s.retryBtnText}>Check Again</Text>
+        <Divider />
+        <TouchableOpacity onPress={checkApi} style={s.retryRow}>
+          <Ionicons name="refresh-outline" size={14} color={C.text2} />
+          <Text style={s.retryText}>Check Again</Text>
         </TouchableOpacity>
       </View>
 
-      {/* ── Debug ── */}
+      {/* ── Developer ── */}
       <SectionLabel>Developer</SectionLabel>
       <View style={s.card}>
         <TouchableOpacity style={s.actionRow} onPress={() => setShowLogs(true)}>
-          <View style={s.actionIcon}><Text style={s.actionIconText}>🪵</Text></View>
+          <View style={s.actionIcon}>
+            <Ionicons name="terminal-outline" size={18} color={C.accent} />
+          </View>
           <View style={{ flex: 1 }}>
             <Text style={s.actionTitle}>Debug Logs</Text>
             <Text style={s.actionHint}>API calls, errors, auth events</Text>
           </View>
-          <Text style={s.actionChevron}>›</Text>
+          <Ionicons name="chevron-forward" size={16} color={C.text3} />
         </TouchableOpacity>
       </View>
 
@@ -274,18 +270,13 @@ export default function SettingsScreen() {
       <CreateModal
         visible={showCreate}
         onClose={() => setShowCreate(false)}
-        onSuccess={(newStore) => {
-          setShowCreate(false);
-          loadStores();
-          switchStore(newStore.store_id);
-        }}
+        onSuccess={(newStore) => { setShowCreate(false); loadStores(); switchStore(newStore.store_id); }}
       />
       <LogsModal visible={showLogs} onClose={() => setShowLogs(false)} />
-
       {showRequests && (
         <RequestsModal
           storeId={showRequests}
-          storeName={myStores.find(s => s.store_id === showRequests)?.name || ''}
+          storeName={myStores.find(st => st.store_id === showRequests)?.name || ''}
           onClose={() => { setShowRequests(null); loadStores(); }}
         />
       )}
@@ -293,34 +284,25 @@ export default function SettingsScreen() {
   );
 }
 
-// ─── Join Store Modal ────────────────────────────────────────────
+// ─── Join Store Modal ─────────────────────────────────────────────
 
 function JoinModal({ visible, onClose, onSuccess }) {
-  const [code, setCode]         = useState('');
-  const [message, setMessage]   = useState('');
-  const [found, setFound]       = useState(null);   // store preview
-  const [step, setStep]         = useState('code'); // 'code' | 'confirm' | 'sent'
-  const [loading, setLoading]   = useState(false);
-  const [error, setError]       = useState('');
+  const [code, setCode]       = useState('');
+  const [message, setMessage] = useState('');
+  const [found, setFound]     = useState(null);
+  const [step, setStep]       = useState('code');
+  const [loading, setLoading] = useState(false);
+  const [error, setError]     = useState('');
 
-  function reset() {
-    setCode(''); setMessage(''); setFound(null);
-    setStep('code'); setError('');
-  }
+  function reset() { setCode(''); setMessage(''); setFound(null); setStep('code'); setError(''); }
 
   async function handleLookup() {
     if (code.trim().length < 4) { setError('Enter the full invite code.'); return; }
     setLoading(true); setError('');
     try {
       const result = await api.lookupStoreByCode(code.trim());
-      if (result.membership?.status === 'active') {
-        setError("You're already a member of this store.");
-        setLoading(false); return;
-      }
-      if (result.join_request?.status === 'pending') {
-        setError('You already have a pending request for this store.');
-        setLoading(false); return;
-      }
+      if (result.membership?.status === 'active') { setError("You're already a member of this store."); return; }
+      if (result.join_request?.status === 'pending') { setError('You already have a pending request.'); return; }
       setFound(result);
       setStep('confirm');
     } catch (e) {
@@ -348,7 +330,7 @@ function JoinModal({ visible, onClose, onSuccess }) {
         <View style={m.header}>
           <Text style={m.title}>Join a Store</Text>
           <TouchableOpacity onPress={() => { reset(); onClose(); }}>
-            <Text style={m.closeBtn}>✕</Text>
+            <Ionicons name="close" size={24} color={C.text2} />
           </TouchableOpacity>
         </View>
 
@@ -360,7 +342,7 @@ function JoinModal({ visible, onClose, onSuccess }) {
               value={code}
               onChangeText={t => { setCode(t.toUpperCase()); setError(''); }}
               placeholder="e.g. DRIFT1"
-              placeholderTextColor="#444"
+              placeholderTextColor={C.text3}
               autoCapitalize="characters"
               maxLength={8}
             />
@@ -370,10 +352,7 @@ function JoinModal({ visible, onClose, onSuccess }) {
               onPress={handleLookup}
               disabled={!code.trim() || loading}
             >
-              {loading
-                ? <ActivityIndicator color="#fff" />
-                : <Text style={m.btnText}>Find Store</Text>
-              }
+              {loading ? <ActivityIndicator color={C.bg} /> : <Text style={m.btnText}>Find Store</Text>}
             </TouchableOpacity>
           </>
         )}
@@ -393,26 +372,18 @@ function JoinModal({ visible, onClose, onSuccess }) {
               style={[m.input, { height: 80, textAlignVertical: 'top' }]}
               value={message}
               onChangeText={setMessage}
-              placeholder="Hi, I'm a new employee at the store…"
-              placeholderTextColor="#444"
+              placeholder="Hi, I'm a new employee…"
+              placeholderTextColor={C.text3}
               multiline
             />
             {error ? <Text style={m.error}>{error}</Text> : null}
-
-            <Text style={m.hint}>
-              Your request will be sent to the store owner for approval.
-              You'll need to re-open settings to confirm once approved.
-            </Text>
-
+            <Text style={m.hint}>Your request will be sent to the store owner for approval.</Text>
             <TouchableOpacity
               style={[m.btn, loading && m.btnDisabled]}
               onPress={handleSubmit}
               disabled={loading}
             >
-              {loading
-                ? <ActivityIndicator color="#fff" />
-                : <Text style={m.btnText}>Send Join Request</Text>
-              }
+              {loading ? <ActivityIndicator color={C.bg} /> : <Text style={m.btnText}>Send Join Request</Text>}
             </TouchableOpacity>
             <TouchableOpacity style={m.ghostBtn} onPress={() => setStep('code')}>
               <Text style={m.ghostBtnText}>← Back</Text>
@@ -422,10 +393,10 @@ function JoinModal({ visible, onClose, onSuccess }) {
 
         {step === 'sent' && (
           <View style={m.successWrap}>
-            <Text style={m.successIcon}>📬</Text>
+            <Ionicons name="mail-outline" size={56} color={C.accent} style={{ marginBottom: 16 }} />
             <Text style={m.successTitle}>Request Sent</Text>
             <Text style={m.successText}>
-              The store owner will review your request. Check back in Settings once they've responded.
+              The store owner will review your request. Check back in Account once they've responded.
             </Text>
             <TouchableOpacity style={m.btn} onPress={() => { reset(); onSuccess(); }}>
               <Text style={m.btnText}>Done</Text>
@@ -437,7 +408,7 @@ function JoinModal({ visible, onClose, onSuccess }) {
   );
 }
 
-// ─── Create Store Modal ──────────────────────────────────────────
+// ─── Create Store Modal ───────────────────────────────────────────
 
 function CreateModal({ visible, onClose, onSuccess }) {
   const [name, setName]       = useState('');
@@ -451,10 +422,7 @@ function CreateModal({ visible, onClose, onSuccess }) {
   async function handleCreate() {
     if (!name.trim())   { setError('Store name is required.'); return; }
     if (!prefix.trim()) { setError('SKU prefix is required (e.g. DL, MG).'); return; }
-    if (!/^[A-Za-z]{1,4}$/.test(prefix.trim())) {
-      setError('Prefix must be 1–4 letters only.');
-      return;
-    }
+    if (!/^[A-Za-z]{1,4}$/.test(prefix.trim())) { setError('Prefix must be 1–4 letters only.'); return; }
     setLoading(true); setError('');
     try {
       const result = await api.createStore({
@@ -477,42 +445,24 @@ function CreateModal({ visible, onClose, onSuccess }) {
         <View style={m.header}>
           <Text style={m.title}>Create a Store</Text>
           <TouchableOpacity onPress={() => { reset(); onClose(); }}>
-            <Text style={m.closeBtn}>✕</Text>
+            <Ionicons name="close" size={24} color={C.text2} />
           </TouchableOpacity>
         </View>
 
         <Text style={m.label}>Store Name</Text>
-        <TextInput
-          style={m.input}
-          value={name}
-          onChangeText={setName}
-          placeholder="Driftless Books & Music"
-          placeholderTextColor="#444"
-        />
+        <TextInput style={m.input} value={name} onChangeText={setName}
+          placeholder="Driftless Books & Music" placeholderTextColor={C.text3} />
 
         <Text style={m.label}>Address <Text style={m.optional}>(optional)</Text></Text>
-        <TextInput
-          style={m.input}
-          value={address}
-          onChangeText={setAddress}
-          placeholder="518 Walnut St, Viroqua WI"
-          placeholderTextColor="#444"
-        />
+        <TextInput style={m.input} value={address} onChangeText={setAddress}
+          placeholder="518 Walnut St, Viroqua WI" placeholderTextColor={C.text3} />
 
         <Text style={m.label}>SKU Prefix</Text>
-        <TextInput
-          style={m.input}
-          value={prefix}
+        <TextInput style={m.input} value={prefix}
           onChangeText={t => setPrefix(t.toUpperCase())}
-          placeholder="DL"
-          placeholderTextColor="#444"
-          autoCapitalize="characters"
-          maxLength={4}
-        />
-        <Text style={m.hint}>
-          2–4 letters that appear at the start of every SKU (e.g. DL-1234).
-          Each store must have a unique prefix.
-        </Text>
+          placeholder="DL" placeholderTextColor={C.text3}
+          autoCapitalize="characters" maxLength={4} />
+        <Text style={m.hint}>2–4 letters that start every SKU (e.g. DL-1234). Must be unique.</Text>
 
         {error ? <Text style={m.error}>{error}</Text> : null}
 
@@ -521,10 +471,7 @@ function CreateModal({ visible, onClose, onSuccess }) {
           onPress={handleCreate}
           disabled={!name.trim() || !prefix.trim() || loading}
         >
-          {loading
-            ? <ActivityIndicator color="#fff" />
-            : <Text style={m.btnText}>Create Store</Text>
-          }
+          {loading ? <ActivityIndicator color={C.bg} /> : <Text style={m.btnText}>Create Store</Text>}
         </TouchableOpacity>
         <TouchableOpacity style={m.ghostBtn} onPress={() => { reset(); onClose(); }}>
           <Text style={m.ghostBtnText}>Cancel</Text>
@@ -534,12 +481,12 @@ function CreateModal({ visible, onClose, onSuccess }) {
   );
 }
 
-// ─── Pending Requests Modal ──────────────────────────────────────
+// ─── Pending Requests Modal ───────────────────────────────────────
 
 function RequestsModal({ storeId, storeName, onClose }) {
   const [requests, setRequests] = useState([]);
   const [loading, setLoading]   = useState(true);
-  const [acting, setActing]     = useState(null); // request_id being acted on
+  const [acting, setActing]     = useState(null);
 
   useEffect(() => { loadRequests(); }, []);
 
@@ -548,11 +495,8 @@ function RequestsModal({ storeId, storeName, onClose }) {
     try {
       const { requests: reqs } = await api.getJoinRequests(storeId);
       setRequests(reqs || []);
-    } catch {
-      setRequests([]);
-    } finally {
-      setLoading(false);
-    }
+    } catch { setRequests([]); }
+    finally { setLoading(false); }
   }
 
   async function handle(requestId, action) {
@@ -573,17 +517,16 @@ function RequestsModal({ storeId, storeName, onClose }) {
         <View style={m.header}>
           <Text style={m.title}>Join Requests</Text>
           <TouchableOpacity onPress={onClose}>
-            <Text style={m.closeBtn}>✕</Text>
+            <Ionicons name="close" size={24} color={C.text2} />
           </TouchableOpacity>
         </View>
-
         <Text style={m.storeSubtitle}>{storeName}</Text>
 
         {loading ? (
-          <ActivityIndicator color={ACCENT} style={{ marginTop: 40 }} />
+          <ActivityIndicator color={C.accent} style={{ marginTop: 40 }} />
         ) : requests.length === 0 ? (
           <View style={m.emptyWrap}>
-            <Text style={m.emptyIcon}>✅</Text>
+            <Ionicons name="checkmark-circle" size={48} color={C.green} style={{ marginBottom: 12 }} />
             <Text style={m.emptyText}>No pending requests</Text>
           </View>
         ) : (
@@ -593,28 +536,20 @@ function RequestsModal({ storeId, storeName, onClose }) {
                 <View style={m.requestInfo}>
                   <Text style={m.requestName}>{req.user_name || 'Unknown'}</Text>
                   <Text style={m.requestEmail}>{req.user_email}</Text>
-                  {req.message ? (
+                  {req.message && (
                     <Text style={m.requestMessage}>"{req.message}"</Text>
-                  ) : null}
-                  <Text style={m.requestDate}>
-                    {new Date(req.created_at).toLocaleDateString()}
-                  </Text>
+                  )}
+                  <Text style={m.requestDate}>{new Date(req.created_at).toLocaleDateString()}</Text>
                 </View>
                 <View style={m.requestActions}>
                   {acting === req.request_id ? (
-                    <ActivityIndicator color={ACCENT} />
+                    <ActivityIndicator color={C.accent} />
                   ) : (
                     <>
-                      <TouchableOpacity
-                        style={m.approveBtn}
-                        onPress={() => handle(req.request_id, 'approve')}
-                      >
+                      <TouchableOpacity style={m.approveBtn} onPress={() => handle(req.request_id, 'approve')}>
                         <Text style={m.approveBtnText}>Approve</Text>
                       </TouchableOpacity>
-                      <TouchableOpacity
-                        style={m.denyBtn}
-                        onPress={() => handle(req.request_id, 'deny')}
-                      >
+                      <TouchableOpacity style={m.denyBtn} onPress={() => handle(req.request_id, 'deny')}>
                         <Text style={m.denyBtnText}>Deny</Text>
                       </TouchableOpacity>
                     </>
@@ -629,13 +564,13 @@ function RequestsModal({ storeId, storeName, onClose }) {
   );
 }
 
-// ─── Logs Modal ─────────────────────────────────────────────────
+// ─── Logs Modal ───────────────────────────────────────────────────
 
 const LOG_COLORS = {
-  error: '#e74c3c',
-  warn:  '#f39c12',
-  info:  '#3498db',
-  debug: '#555',
+  error: C.red,
+  warn:  C.yellow,
+  info:  C.blue,
+  debug: C.text3,
 };
 
 function LogsModal({ visible, onClose }) {
@@ -656,8 +591,8 @@ function LogsModal({ visible, onClose }) {
             <TouchableOpacity onPress={() => logger.clear()} style={lm.clearBtn}>
               <Text style={lm.clearBtnText}>Clear</Text>
             </TouchableOpacity>
-            <TouchableOpacity onPress={onClose} style={{ padding: 4 }}>
-              <Text style={lm.closeBtn}>✕</Text>
+            <TouchableOpacity onPress={onClose}>
+              <Ionicons name="close" size={24} color={C.text2} />
             </TouchableOpacity>
           </View>
         </View>
@@ -678,9 +613,7 @@ function LogsModal({ visible, onClose }) {
                   <Text style={[lm.level, { color: LOG_COLORS[item.level] }]}>
                     {item.level.toUpperCase()}
                   </Text>
-                  <Text style={lm.time}>
-                    {new Date(item.timestamp).toLocaleTimeString()}
-                  </Text>
+                  <Text style={lm.time}>{new Date(item.timestamp).toLocaleTimeString()}</Text>
                 </View>
                 <Text style={lm.message}>{item.message}</Text>
                 {item.data ? (
@@ -695,228 +628,210 @@ function LogsModal({ visible, onClose }) {
   );
 }
 
+// ─── Log modal styles ─────────────────────────────────────────────
 const lm = StyleSheet.create({
-  container: { flex: 1, backgroundColor: BG },
+  container: { flex: 1, backgroundColor: C.bg },
   header: {
     flexDirection: 'row', justifyContent: 'space-between',
     alignItems: 'center', padding: 16,
-    borderBottomWidth: 1, borderBottomColor: '#1a1a2a',
+    borderBottomWidth: 1, borderBottomColor: C.border,
+    backgroundColor: C.surface,
   },
-  title: { color: '#fff', fontSize: 18, fontWeight: '700' },
+  title:       { color: C.text, fontSize: 18, fontWeight: '700' },
   headerRight: { flexDirection: 'row', alignItems: 'center', gap: 16 },
-  clearBtn: { padding: 4 },
-  clearBtnText: { color: ACCENT, fontSize: 14 },
-  closeBtn: { color: '#555', fontSize: 20 },
-  empty: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  emptyText: { color: '#555', fontSize: 14 },
+  clearBtn:    { padding: 4 },
+  clearBtnText:{ color: C.accent, fontSize: 14 },
+  empty:       { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  emptyText:   { color: C.text2, fontSize: 14 },
   entry: {
-    backgroundColor: CARD, borderRadius: 8, padding: 10,
-    marginBottom: 6, borderWidth: 1, borderColor: '#1e1e2e',
+    backgroundColor: C.card, borderRadius: 8, padding: 10,
+    marginBottom: 6, borderWidth: 1, borderColor: C.border,
   },
   entryHeader: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 },
-  level: { fontSize: 10, fontWeight: '800', letterSpacing: 0.5 },
-  time: { color: '#444', fontSize: 10, fontFamily: 'monospace' },
-  message: { color: '#ccc', fontSize: 12, fontFamily: 'monospace' },
-  data: { color: '#555', fontSize: 10, fontFamily: 'monospace', marginTop: 4 },
+  level:       { fontSize: 10, fontWeight: '800', letterSpacing: 0.5 },
+  time:        { color: C.text3, fontSize: 10, fontFamily: 'monospace' },
+  message:     { color: C.text2, fontSize: 12, fontFamily: 'monospace' },
+  data:        { color: C.text3, fontSize: 10, fontFamily: 'monospace', marginTop: 4 },
 });
 
-// ─── Styles ──────────────────────────────────────────────────────
-
+// ─── Main styles ──────────────────────────────────────────────────
 const s = StyleSheet.create({
-  container: { flex: 1, backgroundColor: BG },
-  content: { padding: 16, paddingBottom: 48 },
+  container: { flex: 1, backgroundColor: C.bg },
+  content:   { padding: 16, paddingBottom: 52 },
 
   sectionLabel: {
-    color: '#444', fontSize: 11, textTransform: 'uppercase',
-    letterSpacing: 1, marginBottom: 8, marginTop: 4, paddingHorizontal: 2,
+    color: C.text3, fontSize: 11, textTransform: 'uppercase',
+    letterSpacing: 0.8, marginBottom: 8, marginTop: 4, paddingHorizontal: 2,
   },
-  divider: { height: 1, backgroundColor: '#1a1a2a', marginHorizontal: 0 },
+  divider: { height: 1, backgroundColor: C.border },
 
   card: {
-    backgroundColor: CARD, borderRadius: 12,
-    marginBottom: 20, borderWidth: 1, borderColor: '#1e1e2e', overflow: 'hidden',
-  },
-  cardLabel: {
-    color: '#444', fontSize: 11, textTransform: 'uppercase', letterSpacing: 1,
-    paddingHorizontal: 16, paddingTop: 14, paddingBottom: 12,
+    backgroundColor: C.card, borderRadius: 14,
+    marginBottom: 20, borderWidth: 1, borderColor: C.border, overflow: 'hidden',
   },
 
+  // Account
   accountRow: {
-    flexDirection: 'row', alignItems: 'flex-start',
-    paddingHorizontal: 16, paddingBottom: 16, gap: 14,
+    flexDirection: 'row', alignItems: 'center',
+    padding: 16, gap: 14,
   },
   avatar: {
     width: 52, height: 52, borderRadius: 26,
-    backgroundColor: ACCENT, alignItems: 'center', justifyContent: 'center',
+    backgroundColor: C.accentBg, borderWidth: 2, borderColor: C.accent,
+    alignItems: 'center', justifyContent: 'center',
   },
-  avatarText: { color: '#fff', fontWeight: '800', fontSize: 18 },
-  accountName: { color: '#fff', fontSize: 16, fontWeight: '700' },
-  accountEmail: { color: '#555', fontSize: 12, marginTop: 2 },
-  signOutBtn: {
-    marginHorizontal: 16, marginBottom: 14,
-    borderWidth: 1, borderColor: '#3a1515',
-    borderRadius: 8, padding: 10, alignItems: 'center', backgroundColor: '#1a0808',
+  avatarText:   { color: C.accent, fontWeight: '800', fontSize: 18 },
+  accountName:  { color: C.text, fontSize: 16, fontWeight: '700' },
+  accountEmail: { color: C.text2, fontSize: 12, marginTop: 2 },
+  signOutRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+    padding: 14, paddingHorizontal: 16,
   },
-  signOutText: { color: '#e74c3c', fontWeight: '700', fontSize: 13 },
+  signOutText: { color: C.red, fontWeight: '600', fontSize: 14 },
 
-  noStoresWrap: { padding: 20, alignItems: 'center' },
-  noStoresText: { color: '#555', fontSize: 14 },
+  emptyStores: { padding: 24, alignItems: 'center' },
+  emptyStoresText: { color: C.text2, fontSize: 14 },
 
+  // Store rows
   storeRow: {
     flexDirection: 'row', alignItems: 'center',
     paddingHorizontal: 16, paddingVertical: 14, gap: 12,
   },
-  storeRowActive: { backgroundColor: '#160810' },
+  storeRowActive: { backgroundColor: C.accentBg },
   storePrefix: {
-    width: 36, height: 36, borderRadius: 8,
-    backgroundColor: SURFACE, alignItems: 'center', justifyContent: 'center',
+    width: 38, height: 38, borderRadius: 8,
+    backgroundColor: C.surface, alignItems: 'center', justifyContent: 'center',
+    borderWidth: 1, borderColor: C.border,
   },
-  storePrefixActive: { backgroundColor: '#2d0e1a' },
-  storePrefixText: { color: '#555', fontWeight: '800', fontSize: 12, fontFamily: 'monospace' },
-  storePrefixTextActive: { color: ACCENT },
-  storeName: { color: '#888', fontSize: 14, fontWeight: '600' },
-  storeNameActive: { color: '#fff' },
+  storePrefixActive:     { backgroundColor: C.accentBg, borderColor: C.accent },
+  storePrefixText:       { color: C.text3, fontWeight: '800', fontSize: 12, fontFamily: 'monospace' },
+  storePrefixTextActive: { color: C.accent },
+  storeName:             { color: C.text2, fontSize: 14, fontWeight: '600' },
+  storeNameActive:       { color: C.text },
   storeMetaRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 3 },
   roleBadge: {
-    paddingHorizontal: 6, paddingVertical: 2,
-    borderRadius: 4, borderWidth: 1, borderColor: '#333', backgroundColor: '#1a1a2a',
+    paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4,
+    borderWidth: 1, borderColor: C.border, backgroundColor: C.surface,
   },
-  roleBadgeText: { color: '#666', fontSize: 10, fontWeight: '700', textTransform: 'uppercase' },
-  storeAddr: { color: '#444', fontSize: 11 },
-  storeRight: { alignItems: 'flex-end', gap: 4 },
-  storeCheck: { color: ACCENT, fontSize: 16, fontWeight: '700' },
+  roleBadgeText: { color: C.text3, fontSize: 10, fontWeight: '700', textTransform: 'uppercase' },
+  storeAddr:     { color: C.text3, fontSize: 11 },
+  storeRight:    { alignItems: 'flex-end', gap: 4 },
   pendingBadge: {
-    backgroundColor: ACCENT, borderRadius: 10,
-    minWidth: 20, height: 20, alignItems: 'center', justifyContent: 'center',
-    paddingHorizontal: 5,
+    backgroundColor: C.accent, borderRadius: 10,
+    minWidth: 20, height: 20, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 5,
   },
-  pendingBadgeText: { color: '#fff', fontSize: 11, fontWeight: '800' },
+  pendingBadgeText: { color: C.bg, fontSize: 11, fontWeight: '800' },
 
   inviteRow: {
-    flexDirection: 'row', alignItems: 'center',
+    flexDirection: 'row', alignItems: 'center', gap: 6,
     paddingHorizontal: 16, paddingVertical: 10,
-    backgroundColor: '#0c0c17', gap: 8,
+    backgroundColor: C.surface,
   },
-  inviteLabel: { color: '#444', fontSize: 11 },
-  inviteCode: {
-    color: ACCENT, fontSize: 14, fontWeight: '800',
-    fontFamily: 'monospace', letterSpacing: 2,
-  },
-  reviewBtn: { marginLeft: 'auto' },
-  reviewBtnText: { color: YELLOW, fontSize: 12, fontWeight: '600' },
+  inviteLabel: { color: C.text3, fontSize: 11 },
+  inviteCode:  { color: C.accent, fontSize: 14, fontWeight: '800', fontFamily: 'monospace', letterSpacing: 2 },
+  reviewBtnText: { color: C.yellow, fontSize: 12, fontWeight: '600' },
 
+  // Action rows
   actionRow: {
     flexDirection: 'row', alignItems: 'center',
     paddingHorizontal: 16, paddingVertical: 14, gap: 12,
   },
   actionIcon: {
-    width: 36, height: 36, borderRadius: 8,
-    backgroundColor: SURFACE, alignItems: 'center', justifyContent: 'center',
+    width: 36, height: 36, borderRadius: 9,
+    backgroundColor: C.accentBg, alignItems: 'center', justifyContent: 'center',
+    borderWidth: 1, borderColor: C.border,
   },
-  actionIconText: { fontSize: 18 },
-  actionTitle: { color: '#fff', fontSize: 14, fontWeight: '600' },
-  actionHint: { color: '#555', fontSize: 11, marginTop: 2 },
-  actionChevron: { color: '#444', fontSize: 22 },
+  actionTitle: { color: C.text, fontSize: 14, fontWeight: '600' },
+  actionHint:  { color: C.text3, fontSize: 11, marginTop: 2 },
 
+  // Connection
   statusRow: {
     flexDirection: 'row', alignItems: 'center',
     paddingHorizontal: 16, paddingTop: 14, paddingBottom: 4,
   },
-  statusLabel: { color: '#888', fontSize: 14 },
-  apiUrl: { color: '#444', fontSize: 11, marginTop: 2, fontFamily: 'monospace' },
+  statusLabel: { color: C.text, fontSize: 14, fontWeight: '500' },
+  apiUrl: { color: C.text3, fontSize: 11, marginTop: 3, fontFamily: 'monospace' },
   statusBadge: {
     flexDirection: 'row', alignItems: 'center',
-    borderWidth: 1, borderRadius: 20,
-    paddingHorizontal: 10, paddingVertical: 4, gap: 5,
+    borderWidth: 1, borderRadius: 20, paddingHorizontal: 10, paddingVertical: 4, gap: 5,
   },
-  statusDot: { width: 6, height: 6, borderRadius: 3 },
+  statusDot:  { width: 6, height: 6, borderRadius: 3 },
   statusText: { fontSize: 12, fontWeight: '700' },
-  retryBtn: {
-    marginHorizontal: 16, marginBottom: 14, marginTop: 10,
-    padding: 8, borderRadius: 8, backgroundColor: SURFACE, alignItems: 'center',
+  retryRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    padding: 12, paddingHorizontal: 16, justifyContent: 'center',
   },
-  retryBtnText: { color: '#888', fontSize: 13 },
+  retryText: { color: C.text2, fontSize: 13 },
 
-  version: { color: '#2a2a3a', textAlign: 'center', fontSize: 11, marginTop: 4 },
+  version: { color: C.text3, textAlign: 'center', fontSize: 11, marginTop: 4, opacity: 0.6 },
 });
 
-// Modal styles (shared across all three modals)
+// ─── Modal styles (shared) ────────────────────────────────────────
 const m = StyleSheet.create({
-  container: { flex: 1, backgroundColor: BG, padding: 20 },
+  container: { flex: 1, backgroundColor: C.bg, padding: 20 },
   header: {
     flexDirection: 'row', justifyContent: 'space-between',
     alignItems: 'center', marginBottom: 24,
   },
-  title: { color: '#fff', fontSize: 20, fontWeight: '700' },
-  closeBtn: { color: '#555', fontSize: 22, padding: 4 },
-  storeSubtitle: { color: '#888', fontSize: 13, marginBottom: 20, marginTop: -12 },
+  title:        { color: C.text, fontSize: 20, fontWeight: '700' },
+  storeSubtitle:{ color: C.text2, fontSize: 13, marginBottom: 20, marginTop: -12 },
 
-  label: { color: '#888', fontSize: 12, marginBottom: 6, marginTop: 16 },
-  optional: { color: '#444' },
+  label:    { color: C.text2, fontSize: 12, marginBottom: 6, marginTop: 18 },
+  optional: { color: C.text3 },
   input: {
-    backgroundColor: SURFACE, borderWidth: 1, borderColor: '#252535',
+    backgroundColor: C.surface, borderWidth: 1, borderColor: C.border,
     borderRadius: 10, paddingHorizontal: 14, paddingVertical: 12,
-    color: '#fff', fontSize: 15,
+    color: C.text, fontSize: 15,
   },
-  hint: { color: '#444', fontSize: 12, marginTop: 8, lineHeight: 18 },
-  error: { color: '#e74c3c', fontSize: 13, marginTop: 8 },
+  hint:  { color: C.text3, fontSize: 12, marginTop: 8, lineHeight: 18 },
+  error: { color: C.red, fontSize: 13, marginTop: 8 },
 
   btn: {
-    backgroundColor: ACCENT, padding: 16,
-    borderRadius: 12, alignItems: 'center', marginTop: 20,
+    backgroundColor: C.accent, padding: 16,
+    borderRadius: 12, alignItems: 'center', marginTop: 22,
   },
   btnDisabled: { opacity: 0.4 },
-  btnText: { color: '#fff', fontWeight: '700', fontSize: 15 },
-  ghostBtn: { alignItems: 'center', padding: 14 },
-  ghostBtnText: { color: '#555', fontSize: 14 },
+  btnText:     { color: C.bg, fontWeight: '700', fontSize: 15 },
+  ghostBtn:    { alignItems: 'center', padding: 14 },
+  ghostBtnText:{ color: C.text2, fontSize: 14 },
 
   storePreview: {
     flexDirection: 'row', alignItems: 'center',
-    backgroundColor: SURFACE, borderRadius: 10,
+    backgroundColor: C.surface, borderRadius: 10,
     padding: 14, gap: 12, marginTop: 8,
-    borderWidth: 1, borderColor: '#252535',
+    borderWidth: 1, borderColor: C.border,
   },
-  previewPrefix: {
-    color: ACCENT, fontSize: 18, fontWeight: '800',
-    fontFamily: 'monospace', width: 36,
-  },
-  previewName: { color: '#fff', fontSize: 15, fontWeight: '600' },
-  previewAddr: { color: '#555', fontSize: 12, marginTop: 2 },
+  previewPrefix: { color: C.accent, fontSize: 18, fontWeight: '800', fontFamily: 'monospace', width: 36 },
+  previewName:   { color: C.text, fontSize: 15, fontWeight: '600' },
+  previewAddr:   { color: C.text2, fontSize: 12, marginTop: 2 },
 
   successWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingBottom: 40 },
-  successIcon: { fontSize: 56, marginBottom: 16 },
-  successTitle: { color: '#fff', fontSize: 20, fontWeight: '700' },
-  successText: {
-    color: '#888', fontSize: 14, textAlign: 'center',
-    marginTop: 10, lineHeight: 22, paddingHorizontal: 20,
-  },
+  successTitle:{ color: C.text, fontSize: 20, fontWeight: '700' },
+  successText: { color: C.text2, fontSize: 14, textAlign: 'center', marginTop: 10, lineHeight: 22, paddingHorizontal: 20 },
 
-  // Requests modal
   requestCard: {
-    backgroundColor: CARD, borderRadius: 10,
-    padding: 14, marginBottom: 10,
-    borderWidth: 1, borderColor: '#1e1e2e',
+    backgroundColor: C.card, borderRadius: 10, padding: 14,
+    marginBottom: 10, borderWidth: 1, borderColor: C.border,
   },
-  requestInfo: { marginBottom: 12 },
-  requestName: { color: '#fff', fontSize: 15, fontWeight: '700' },
-  requestEmail: { color: '#888', fontSize: 13, marginTop: 2 },
-  requestMessage: { color: '#aaa', fontSize: 13, marginTop: 6, fontStyle: 'italic' },
-  requestDate: { color: '#444', fontSize: 11, marginTop: 6 },
+  requestInfo:    { marginBottom: 12 },
+  requestName:    { color: C.text, fontSize: 15, fontWeight: '700' },
+  requestEmail:   { color: C.text2, fontSize: 13, marginTop: 2 },
+  requestMessage: { color: C.text2, fontSize: 13, marginTop: 6, fontStyle: 'italic' },
+  requestDate:    { color: C.text3, fontSize: 11, marginTop: 6 },
   requestActions: { flexDirection: 'row', gap: 10 },
   approveBtn: {
-    flex: 1, backgroundColor: '#0d2a15',
-    borderWidth: 1, borderColor: GREEN,
+    flex: 1, backgroundColor: C.greenBg,
+    borderWidth: 1, borderColor: C.green,
     borderRadius: 8, padding: 10, alignItems: 'center',
   },
-  approveBtnText: { color: GREEN, fontWeight: '700', fontSize: 14 },
+  approveBtnText: { color: C.green, fontWeight: '700', fontSize: 14 },
   denyBtn: {
-    flex: 1, backgroundColor: '#1a0808',
-    borderWidth: 1, borderColor: '#e74c3c',
+    flex: 1, backgroundColor: C.redBg,
+    borderWidth: 1, borderColor: C.red,
     borderRadius: 8, padding: 10, alignItems: 'center',
   },
-  denyBtnText: { color: '#e74c3c', fontWeight: '700', fontSize: 14 },
+  denyBtnText: { color: C.red, fontWeight: '700', fontSize: 14 },
 
   emptyWrap: { alignItems: 'center', marginTop: 60 },
-  emptyIcon: { fontSize: 48, marginBottom: 12 },
-  emptyText: { color: '#555', fontSize: 15 },
+  emptyText: { color: C.text2, fontSize: 15 },
 });

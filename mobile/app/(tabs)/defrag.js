@@ -1,5 +1,5 @@
 /**
- * Gibson — Defrag / Shelf Verification Tab.
+ * Gibson — Shelf Verification Tab.
  * Walk inventory section by section, card by card.
  * FOUND ✓ | FOUND—UPDATE | NOT FOUND | SKIP
  */
@@ -10,46 +10,41 @@ import {
   ActivityIndicator, Modal, TextInput, Alert, Linking,
 } from 'react-native';
 import * as DocumentPicker from 'expo-document-picker';
+import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { api } from '../../src/lib/api';
+import { C } from '../../src/lib/theme';
 
-const ACCENT  = '#e94560';
-const BG      = '#0f0f1a';
-const CARD    = '#13131f';
-const GREEN   = '#2ecc71';
-const YELLOW  = '#f39c12';
-const RED     = '#e74c3c';
-const BLUE    = '#3498db';
-const PURPLE  = '#9b59b6';
-const INACTIVE = '#333';
-const MUTED    = '#888';
-
-// ─── Tier badge ──────────────────────────────────────────────
+// ─── Tier badge ───────────────────────────────────────────────────
 function TierBadge({ tier }) {
-  const colors = { 1: GREEN, 2: BLUE, 3: PURPLE };
-  const labels = { 1: 'Gibson', 2: 'Amazon', 3: 'Ka-Zam' };
-  const c = colors[tier] || '#555';
+  const palette = {
+    1: { color: C.green,  label: 'Gibson' },
+    2: { color: C.blue,   label: 'Amazon' },
+    3: { color: C.purple, label: 'Ka-Zam' },
+  };
+  const { color, label } = palette[tier] || { color: C.text3, label: 'T?' };
   return (
-    <View style={[tb.badge, { borderColor: c, backgroundColor: c + '22' }]}>
-      <Text style={[tb.text, { color: c }]}>T{tier} · {labels[tier]}</Text>
+    <View style={[tb.badge, { borderColor: color, backgroundColor: color + '22' }]}>
+      <Text style={[tb.text, { color }]}>T{tier} · {label}</Text>
     </View>
   );
 }
 const tb = StyleSheet.create({
   badge: { borderWidth: 1, borderRadius: 10, paddingHorizontal: 7, paddingVertical: 2 },
-  text: { fontSize: 10, fontWeight: '700' },
+  text:  { fontSize: 10, fontWeight: '700' },
 });
 
-// ─── Progress bar ─────────────────────────────────────────────
-function ProgressBar({ pct, color = GREEN }) {
+// ─── Progress bar ─────────────────────────────────────────────────
+function ProgressBar({ pct, color }) {
+  const barColor = color || C.accent;
   return (
     <View style={pb.track}>
-      <View style={[pb.fill, { width: `${Math.min(100, pct)}%`, backgroundColor: color }]} />
+      <View style={[pb.fill, { width: `${Math.min(100, pct)}%`, backgroundColor: barColor }]} />
     </View>
   );
 }
 const pb = StyleSheet.create({
-  track: { height: 5, backgroundColor: '#1a1a2a', borderRadius: 3, overflow: 'hidden', flex: 1 },
+  track: { height: 5, backgroundColor: C.border, borderRadius: 3, overflow: 'hidden', flex: 1 },
   fill:  { height: '100%', borderRadius: 3 },
 });
 
@@ -58,13 +53,12 @@ const pb = StyleSheet.create({
 // Main screen
 // ═══════════════════════════════════════════════════════════════
 export default function DefragScreen() {
-  const [view, setView]         = useState('dashboard');   // dashboard | queue | missing
-  const [stats, setStats]       = useState(null);
-  const [sections, setSections] = useState([]);
-  const [loading, setLoading]   = useState(true);
+  const [view, setView]           = useState('dashboard');
+  const [stats, setStats]         = useState(null);
+  const [sections, setSections]   = useState([]);
+  const [loading, setLoading]     = useState(true);
   const [showEmpty, setShowEmpty] = useState(false);
 
-  // Queue state
   const [activeSection, setActiveSection]     = useState(null);
   const [sessionId, setSessionId]             = useState(null);
   const [queue, setQueue]                     = useState([]);
@@ -73,15 +67,13 @@ export default function DefragScreen() {
   const [queueLoading, setQueueLoading]       = useState(false);
   const [cardIndex, setCardIndex]             = useState(0);
 
-  // Update modal
   const [updateModal, setUpdateModal]         = useState(false);
   const [updateItem, setUpdateItem]           = useState(null);
   const [updatePrice, setUpdatePrice]         = useState('');
   const [updateCondition, setUpdateCondition] = useState('');
 
-  // Missing state
-  const [missing, setMissing]                 = useState([]);
-  const [missingLoading, setMissingLoading]   = useState(false);
+  const [missing, setMissing]               = useState([]);
+  const [missingLoading, setMissingLoading] = useState(false);
 
   const loadDashboard = useCallback(async () => {
     setLoading(true);
@@ -98,7 +90,6 @@ export default function DefragScreen() {
 
   useEffect(() => { loadDashboard(); }, [loadDashboard]);
 
-  // ── Start verification session for a section ─────────────────
   async function startSection(section) {
     try {
       const sess = await api.defragStartSession(section.section);
@@ -132,15 +123,11 @@ export default function DefragScreen() {
     }
   }
 
-  // ── Verification actions ──────────────────────────────────────
   async function verifyAction(action, extras = {}) {
     const item = queue[cardIndex];
     if (!item) return;
     try {
-      await api.defragVerify(item.stock_item_id, action, {
-        session_id: sessionId,
-        ...extras,
-      });
+      await api.defragVerify(item.stock_item_id, action, { session_id: sessionId, ...extras });
       advanceCard();
     } catch (e) {
       Alert.alert('Error', e.message);
@@ -168,7 +155,6 @@ export default function DefragScreen() {
     setActiveSection(null);
   }
 
-  // ── Missing queue ─────────────────────────────────────────────
   async function loadMissing() {
     setMissingLoading(true);
     try {
@@ -188,7 +174,7 @@ export default function DefragScreen() {
 
   // ── Import ────────────────────────────────────────────────────
   const [importSource, setImportSource]   = useState('kazam');
-  const [importJob, setImportJob]         = useState(null);   // { job_id, status, pct, created, ... }
+  const [importJob, setImportJob]         = useState(null);
   const [importLoading, setImportLoading] = useState(false);
   const importPollRef = React.useRef(null);
 
@@ -233,11 +219,7 @@ export default function DefragScreen() {
       const meta = session?.user?.user_metadata || {};
 
       const formData = new FormData();
-      formData.append('file', {
-        uri: asset.uri,
-        name: asset.name,
-        type: asset.mimeType || 'text/csv',
-      });
+      formData.append('file', { uri: asset.uri, name: asset.name, type: asset.mimeType || 'text/csv' });
       formData.append('dry_run', 'false');
 
       const BASE_URL = process.env.EXPO_PUBLIC_API_BASE_URL || 'http://localhost:8000';
@@ -253,11 +235,9 @@ export default function DefragScreen() {
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       const { job_id } = await resp.json();
 
-      // Start polling every 2 seconds
       setImportJob({ job_id, status: 'running', pct: 0, created: 0, skipped: 0, errors: 0 });
       stopPolling();
       importPollRef.current = setInterval(() => pollJobStatus(job_id), 2000);
-
     } catch (e) {
       setImportLoading(false);
       Alert.alert('Import Error', e.message);
@@ -279,23 +259,26 @@ export default function DefragScreen() {
 
   if (view === 'import') {
     return (
-      <ScrollView style={s.container} contentContainerStyle={[s.content, { paddingTop: 56 }]}>
-        <TouchableOpacity onPress={() => setView('dashboard')}>
-          <Text style={{ color: ACCENT, fontSize: 14, marginBottom: 20 }}>← Back</Text>
+      <ScrollView style={s.container} contentContainerStyle={[s.content, { paddingTop: 16 }]}>
+        <TouchableOpacity onPress={() => setView('dashboard')} style={s.backLink}>
+          <Ionicons name="arrow-back" size={16} color={C.accent} />
+          <Text style={s.backLinkText}>Dashboard</Text>
         </TouchableOpacity>
-        <Text style={{ color: '#fff', fontSize: 18, fontWeight: '700', marginBottom: 4 }}>
-          Import Inventory
-        </Text>
-        <Text style={{ color: '#555', fontSize: 13, marginBottom: 24 }}>
-          Upload a CSV or TSV export from Amazon or Ka-Zam. Each row becomes a stock item with trust tier 2 (Amazon) or 3 (Ka-Zam).
+
+        <Text style={s.pageTitle}>Import Inventory</Text>
+        <Text style={s.pageSubtitle}>
+          Upload a CSV or TSV export from Amazon or Ka-Zam. Each row becomes a stock item.
         </Text>
 
-        {/* Source selector */}
+        <Text style={s.sectionHeader}>Source Format</Text>
         <View style={imp.sourceRow}>
-          {[['kazam', 'Ka-Zam', PURPLE], ['amazon', 'Amazon', BLUE]].map(([key, label, color]) => (
+          {[
+            { key: 'kazam', label: 'Ka-Zam', color: C.purple },
+            { key: 'amazon', label: 'Amazon', color: C.blue },
+          ].map(({ key, label, color }) => (
             <TouchableOpacity
               key={key}
-              style={[imp.sourceBtn, importSource === key && { borderColor: color, backgroundColor: color + '22' }]}
+              style={[imp.sourceBtn, importSource === key && { borderColor: color, backgroundColor: color + '20' }]}
               onPress={() => setImportSource(key)}
             >
               <Text style={[imp.sourceTxt, importSource === key && { color }]}>{label}</Text>
@@ -303,10 +286,10 @@ export default function DefragScreen() {
           ))}
         </View>
 
-        <Text style={{ color: '#555', fontSize: 12, marginBottom: 16 }}>
+        <Text style={s.pageSubtitle}>
           {importSource === 'kazam'
-            ? 'Ka-Zam export: CSV with columns for ISBN, Title, Author, Location, Price, Condition.'
-            : 'Amazon Seller Central: flat-file inventory report TSV (Get Report → Active Listings).'}
+            ? 'Ka-Zam export: CSV with isbn, title, author, location, price, condition columns.'
+            : 'Amazon Seller Central flat-file TSV (Get Report → Active Listings).'}
         </Text>
 
         <TouchableOpacity
@@ -315,45 +298,43 @@ export default function DefragScreen() {
           disabled={importLoading}
         >
           {importLoading && !importJob
-            ? <ActivityIndicator color="#fff" />
-            : <Text style={imp.uploadTxt}>Choose File & Import</Text>
+            ? <ActivityIndicator color={C.bg} />
+            : <>
+                <Ionicons name="cloud-upload-outline" size={18} color={C.bg} />
+                <Text style={imp.uploadTxt}>Choose File & Import</Text>
+              </>
           }
         </TouchableOpacity>
 
         {importJob && (
           <View style={imp.resultCard}>
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 }}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 10 }}>
               <Text style={imp.resultTitle}>
                 {importJob.done
-                  ? (importJob.status === 'failed' ? '✗ Import Failed' : '✓ Import Complete')
-                  : '⟳ Importing…'}
+                  ? (importJob.status === 'failed' ? 'Import Failed' : 'Import Complete')
+                  : 'Importing…'}
               </Text>
-              <Text style={{ color: MUTED, fontSize: 12 }}>{importJob.pct ?? 0}%</Text>
+              <Text style={{ color: C.text2, fontSize: 13, fontWeight: '700' }}>{importJob.pct ?? 0}%</Text>
             </View>
 
-            {/* Progress bar */}
-            <View style={pb.track}>
-              <View style={[pb.fill, {
-                width: `${importJob.pct ?? 0}%`,
-                backgroundColor: importJob.status === 'failed' ? RED : importJob.done ? GREEN : ACCENT,
-              }]} />
-            </View>
+            <ProgressBar pct={importJob.pct ?? 0}
+              color={importJob.status === 'failed' ? C.red : importJob.done ? C.green : C.accent} />
 
-            <Text style={{ color: MUTED, fontSize: 11, marginTop: 6, marginBottom: 12 }}>
+            <Text style={{ color: C.text3, fontSize: 11, marginTop: 8, marginBottom: 14 }}>
               {importJob.processed ?? 0} / {importJob.total ?? '?'} rows processed
             </Text>
 
             <View style={imp.resultRow}>
-              <ResultStat label="Created" value={importJob.created ?? 0}  color={GREEN} />
-              <ResultStat label="Skipped" value={importJob.skipped ?? 0}  color={YELLOW} />
-              <ResultStat label="Errors"  value={importJob.errors  ?? 0}  color={RED} />
+              <ResultStat label="Created" value={importJob.created ?? 0} color={C.green} />
+              <ResultStat label="Skipped" value={importJob.skipped ?? 0} color={C.yellow} />
+              <ResultStat label="Errors"  value={importJob.errors  ?? 0} color={C.red} />
             </View>
 
             {importJob.error_details?.length > 0 && (
               <>
-                <Text style={{ color: RED, fontSize: 12, marginTop: 12, marginBottom: 6 }}>First errors:</Text>
+                <Text style={{ color: C.red, fontSize: 12, marginTop: 14, marginBottom: 6 }}>First errors:</Text>
                 {importJob.error_details.map((e, i) => (
-                  <Text key={i} style={{ color: '#666', fontSize: 11 }}>
+                  <Text key={i} style={{ color: C.text3, fontSize: 11, marginBottom: 2 }}>
                     Row {e.row}: {e.error}
                   </Text>
                 ))}
@@ -413,110 +394,114 @@ export default function DefragScreen() {
   }
 
   // ── Dashboard ─────────────────────────────────────────────────
+  const emptySections = sections.filter(sec => sec.total === 0);
+
   return (
     <ScrollView style={s.container} contentContainerStyle={s.content}>
 
-      {/* Stats header */}
+      {/* Stats card */}
       {loading ? (
-        <ActivityIndicator color={ACCENT} style={{ marginTop: 40 }} />
+        <ActivityIndicator color={C.accent} style={{ marginTop: 40 }} />
       ) : stats ? (
         <View style={s.statsCard}>
-          <Text style={s.statsTitle}>Shelf Verification</Text>
-          <View style={s.statsRow}>
-            <ProgressBar pct={stats.pct_complete} />
+          <View style={s.statsHeader}>
+            <Text style={s.statsTitle}>Inventory Progress</Text>
             <Text style={s.statsPct}>{stats.pct_complete}%</Text>
           </View>
+          <ProgressBar pct={stats.pct_complete} />
+
           <View style={s.statsGrid}>
-            <StatBox label="Total"     value={stats.total}     color="#aaa" />
-            <StatBox label="Verified"  value={stats.verified}  color={GREEN} />
-            <StatBox label="Missing"   value={stats.missing}   color={RED} />
-            <StatBox label="Remaining" value={stats.unverified} color={YELLOW} />
-          </View>
-          <View style={s.tierRow}>
-            <Text style={s.tierLabel}>T1 Gibson</Text>
-            <Text style={[s.tierVal, { color: GREEN }]}>{stats.tier_breakdown.tier1}</Text>
-            <Text style={s.tierLabel}>T2 Amazon</Text>
-            <Text style={[s.tierVal, { color: BLUE }]}>{stats.tier_breakdown.tier2}</Text>
-            <Text style={s.tierLabel}>T3 Ka-Zam</Text>
-            <Text style={[s.tierVal, { color: PURPLE }]}>{stats.tier_breakdown.tier3}</Text>
+            <StatBox label="Total"     value={stats.total}     color={C.text2} />
+            <StatBox label="Verified"  value={stats.verified}  color={C.green} />
+            <StatBox label="Missing"   value={stats.missing}   color={C.red} />
+            <StatBox label="Remaining" value={stats.unverified} color={C.yellow} />
           </View>
 
-          {/* Price staleness */}
+          <View style={s.divider} />
+
+          <View style={s.tierRow}>
+            <TierItem label="Gibson" value={stats.tier_breakdown.tier1} color={C.green} />
+            <TierItem label="Amazon" value={stats.tier_breakdown.tier2} color={C.blue} />
+            <TierItem label="Ka-Zam" value={stats.tier_breakdown.tier3} color={C.purple} />
+          </View>
+
           {stats.price_staleness && (
-            <View style={[s.tierRow, { marginTop: 10, paddingTop: 10, borderTopWidth: 1, borderTopColor: '#1e1e2e' }]}>
-              <Text style={s.tierLabel}>Legacy</Text>
-              <Text style={[s.tierVal, { color: '#e67e22' }]}>{stats.price_staleness.legacy}</Text>
-              <Text style={s.tierLabel}>Stale</Text>
-              <Text style={[s.tierVal, { color: YELLOW }]}>{stats.price_staleness.stale + stats.price_staleness.aging}</Text>
-              <Text style={s.tierLabel}>Fresh</Text>
-              <Text style={[s.tierVal, { color: GREEN }]}>{stats.price_staleness.fresh}</Text>
-              {stats.unsectioned > 0 && <>
-                <Text style={s.tierLabel}>No Section</Text>
-                <Text style={[s.tierVal, { color: RED }]}>{stats.unsectioned}</Text>
-              </>}
-            </View>
+            <>
+              <View style={s.divider} />
+              <View style={s.tierRow}>
+                <TierItem label="Legacy" value={stats.price_staleness.legacy} color={C.yellow} />
+                <TierItem label="Stale"  value={stats.price_staleness.stale + stats.price_staleness.aging} color={C.yellow} />
+                <TierItem label="Fresh"  value={stats.price_staleness.fresh} color={C.green} />
+                {stats.unsectioned > 0 && (
+                  <TierItem label="No Section" value={stats.unsectioned} color={C.red} />
+                )}
+              </View>
+            </>
           )}
         </View>
       ) : null}
 
       {/* Quick actions */}
-      <View style={s.actionRow}>
-        <TouchableOpacity
-          style={[s.actionBtn, { borderColor: ACCENT }]}
+      <View style={s.actionGrid}>
+        <ActionButton
+          label="Import Files"
+          icon="cloud-upload-outline"
+          color={C.accent}
           onPress={() => setView('import')}
-        >
-          <Text style={[s.actionBtnText, { color: ACCENT }]}>Import Files</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[s.actionBtn, { borderColor: RED }]}
+        />
+        <ActionButton
+          label={`Missing${stats?.missing ? ` (${stats.missing})` : ''}`}
+          icon="alert-circle-outline"
+          color={C.red}
           onPress={openMissing}
-        >
-          <Text style={[s.actionBtnText, { color: RED }]}>
-            Missing Queue {stats?.missing ? `(${stats.missing})` : ''}
-          </Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[s.actionBtn, { borderColor: BLUE }]}
+        />
+        <ActionButton
+          label="Amazon TSV"
+          icon="download-outline"
+          color={C.blue}
           onPress={() => Linking.openURL(api.defragExport('amazon', 'verified'))}
-        >
-          <Text style={[s.actionBtnText, { color: BLUE }]}>Amazon TSV</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[s.actionBtn, { borderColor: PURPLE }]}
+        />
+        <ActionButton
+          label="Biblio TSV"
+          icon="download-outline"
+          color={C.purple}
           onPress={() => Linking.openURL(api.defragExport('biblio', 'verified'))}
-        >
-          <Text style={[s.actionBtnText, { color: PURPLE }]}>Biblio TSV</Text>
-        </TouchableOpacity>
+        />
       </View>
 
-      {/* Section list header + controls */}
-      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+      {/* Section list header */}
+      <View style={s.sectionListHeader}>
         <Text style={s.sectionHeader}>Sections</Text>
-        <View style={{ flexDirection: 'row', gap: 8 }}>
-          {sections.some(s => s.total === 0) && (
+        <View style={{ flexDirection: 'row', gap: 12, alignItems: 'center' }}>
+          {emptySections.length > 0 && (
             <TouchableOpacity
               onPress={() => {
                 Alert.alert(
                   'Clean Up Empty Sections',
-                  'Delete all sections with no active inventory?',
+                  `Delete all ${emptySections.length} sections with no active inventory?`,
                   [
                     { text: 'Cancel', style: 'cancel' },
-                    { text: 'Delete All', style: 'destructive', onPress: async () => {
-                      try {
-                        const r = await api.defragDeleteEmptySections();
-                        Alert.alert('Done', `Removed ${r.deleted} empty section${r.deleted !== 1 ? 's' : ''}`);
-                        loadDashboard();
-                      } catch (e) { Alert.alert('Error', e.message); }
-                    }},
+                    {
+                      text: 'Delete All', style: 'destructive',
+                      onPress: async () => {
+                        try {
+                          const r = await api.defragDeleteEmptySections();
+                          Alert.alert('Done', `Removed ${r.deleted} empty section${r.deleted !== 1 ? 's' : ''}`);
+                          loadDashboard();
+                        } catch (e) { Alert.alert('Error', e.message); }
+                      },
+                    },
                   ]
                 );
               }}
             >
-              <Text style={{ color: RED, fontSize: 12 }}>Clean up empty</Text>
+              <Text style={{ color: C.red, fontSize: 12, fontWeight: '600' }}>
+                Clean up empty
+              </Text>
             </TouchableOpacity>
           )}
           <TouchableOpacity onPress={() => setShowEmpty(v => !v)}>
-            <Text style={{ color: showEmpty ? ACCENT : '#555', fontSize: 12 }}>
+            <Text style={{ color: showEmpty ? C.accent : C.text3, fontSize: 12 }}>
               {showEmpty ? 'Hide empty' : 'Show empty'}
             </Text>
           </TouchableOpacity>
@@ -526,89 +511,92 @@ export default function DefragScreen() {
       {loading ? null : sections
         .filter(sec => showEmpty || sec.total > 0)
         .map((sec) => {
-        const pct = sec.total > 0 ? Math.round(sec.verified / sec.total * 100) : 0;
-        const isEmpty = sec.total === 0;
-        const hasQueue = sec.unverified > 0;
-        return (
-          <TouchableOpacity
-            key={sec.location_id || sec.section}
-            style={[s.sectionCard, isEmpty && { borderColor: '#1a1a1a', opacity: 0.6 }]}
-            onPress={() => hasQueue && startSection(sec)}
-            activeOpacity={hasQueue ? 0.7 : 1}
-          >
-            <View style={s.sectionTop}>
-              <Text style={s.sectionName}>{sec.section}</Text>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-                {isEmpty ? (
-                  <TouchableOpacity
-                    onPress={() => {
-                      Alert.alert(
-                        'Delete Section',
-                        `Delete "${sec.section}"? It has no active inventory.`,
-                        [
-                          { text: 'Cancel', style: 'cancel' },
-                          { text: 'Delete', style: 'destructive', onPress: async () => {
-                            try {
-                              await api.defragDeleteSection(sec.location_id);
-                              loadDashboard();
-                            } catch (e) { Alert.alert('Error', e.message); }
-                          }},
-                        ]
-                      );
-                    }}
-                  >
-                    <Text style={{ color: RED, fontSize: 16 }}>🗑</Text>
-                  </TouchableOpacity>
-                ) : (
-                  <Text style={s.sectionPct}>{pct}%</Text>
+          const pct     = sec.total > 0 ? Math.round(sec.verified / sec.total * 100) : 0;
+          const isEmpty = sec.total === 0;
+          const hasQueue = sec.unverified > 0;
+          return (
+            <View
+              key={sec.location_id || sec.section}
+              style={[s.sectionCard, isEmpty && s.sectionCardEmpty]}
+            >
+              <View style={s.sectionTop}>
+                <Text style={[s.sectionName, isEmpty && { color: C.text3 }]}>{sec.section}</Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                  {isEmpty ? (
+                    <TouchableOpacity
+                      style={s.trashBtn}
+                      onPress={() => {
+                        Alert.alert(
+                          'Delete Section',
+                          `Delete "${sec.section}"? It has no active inventory.`,
+                          [
+                            { text: 'Cancel', style: 'cancel' },
+                            {
+                              text: 'Delete', style: 'destructive',
+                              onPress: async () => {
+                                try {
+                                  await api.defragDeleteSection(sec.location_id);
+                                  loadDashboard();
+                                } catch (e) { Alert.alert('Error', e.message); }
+                              },
+                            },
+                          ]
+                        );
+                      }}
+                    >
+                      <Ionicons name="trash-outline" size={16} color={C.red} />
+                    </TouchableOpacity>
+                  ) : (
+                    <Text style={s.sectionPct}>{pct}%</Text>
+                  )}
+                </View>
+              </View>
+
+              {!isEmpty && <ProgressBar pct={pct} color={pct === 100 ? C.green : C.accent} />}
+
+              <View style={s.sectionStats}>
+                <Text style={s.sectionStat}>{sec.total} items</Text>
+                {sec.unverified > 0 && (
+                  <Text style={[s.sectionStat, { color: C.yellow }]}>{sec.unverified} to verify</Text>
+                )}
+                {sec.missing > 0 && (
+                  <Text style={[s.sectionStat, { color: C.red }]}>{sec.missing} missing</Text>
+                )}
+                {sec.tier2 > 0 && (
+                  <Text style={[s.sectionStat, { color: C.blue }]}>T2:{sec.tier2}</Text>
+                )}
+                {sec.tier3 > 0 && (
+                  <Text style={[s.sectionStat, { color: C.purple }]}>T3:{sec.tier3}</Text>
                 )}
               </View>
-            </View>
-            {!isEmpty && <ProgressBar pct={pct} color={pct === 100 ? GREEN : ACCENT} />}
-            <View style={s.sectionStats}>
-              <Text style={s.sectionStat}>{sec.total} items</Text>
-              {sec.unverified > 0 && (
-                <Text style={[s.sectionStat, { color: YELLOW }]}>{sec.unverified} to verify</Text>
-              )}
-              {sec.missing > 0 && (
-                <Text style={[s.sectionStat, { color: RED }]}>{sec.missing} missing</Text>
-              )}
-              {sec.tier2 > 0 && (
-                <Text style={[s.sectionStat, { color: BLUE }]}>T2:{sec.tier2}</Text>
-              )}
-              {sec.tier3 > 0 && (
-                <Text style={[s.sectionStat, { color: PURPLE }]}>T3:{sec.tier3}</Text>
-              )}
-            </View>
-            {hasQueue && (
-              <View style={s.sectionActions}>
-                <TouchableOpacity
-                  style={s.shelfScanBtn}
-                  onPress={async () => {
-                    const sess = await api.defragStartSession(sec.section).catch(() => ({ session_id: null }));
-                    router.push({
-                      pathname: '/shelfscan',
-                      params: { section: sec.section, sessionId: sess.session_id || '' },
-                    });
-                  }}
-                >
-                  <Text style={s.shelfScanBtnText}>📷 Scan Shelf</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={s.tapThroughBtn}
-                  onPress={() => startSection(sec)}
-                >
-                  <Text style={s.tapThroughBtnText}>Tap-Through</Text>
-                </TouchableOpacity>
-              </View>
-            )}
-            {!hasQueue && pct === 100 && !isEmpty && (
-              <Text style={[s.sectionStat, { color: GREEN, marginTop: 6 }]}>✓ Complete</Text>
-            )}
-          </TouchableOpacity>
-        );
-      })}
 
+              {hasQueue && (
+                <View style={s.sectionActions}>
+                  <TouchableOpacity
+                    style={s.shelfScanBtn}
+                    onPress={async () => {
+                      const sess = await api.defragStartSession(sec.section).catch(() => ({ session_id: null }));
+                      router.push({
+                        pathname: '/shelfscan',
+                        params: { section: sec.section, sessionId: sess.session_id || '' },
+                      });
+                    }}
+                  >
+                    <Ionicons name="camera-outline" size={15} color={C.accent} />
+                    <Text style={s.shelfScanBtnText}>Scan Shelf</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={s.tapThroughBtn} onPress={() => startSection(sec)}>
+                    <Text style={s.tapThroughBtnText}>Tap-Through</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+              {!hasQueue && pct === 100 && !isEmpty && (
+                <Text style={[s.sectionStat, { color: C.green, marginTop: 6 }]}>✓ Complete</Text>
+              )}
+            </View>
+          );
+        })
+      }
     </ScrollView>
   );
 }
@@ -617,7 +605,7 @@ function ResultStat({ label, value, color }) {
   return (
     <View style={{ alignItems: 'center', flex: 1 }}>
       <Text style={{ color, fontSize: 22, fontWeight: '700' }}>{value}</Text>
-      <Text style={{ color: '#555', fontSize: 11 }}>{label}</Text>
+      <Text style={{ color: C.text3, fontSize: 11, marginTop: 2 }}>{label}</Text>
     </View>
   );
 }
@@ -631,6 +619,28 @@ function StatBox({ label, value, color }) {
   );
 }
 
+function TierItem({ label, value, color }) {
+  return (
+    <View style={{ alignItems: 'center' }}>
+      <Text style={{ color, fontSize: 14, fontWeight: '700' }}>{value}</Text>
+      <Text style={{ color: C.text3, fontSize: 10, marginTop: 1 }}>{label}</Text>
+    </View>
+  );
+}
+
+function ActionButton({ label, icon, color, onPress }) {
+  return (
+    <TouchableOpacity
+      style={[s.actionBtn, { borderColor: color }]}
+      onPress={onPress}
+      activeOpacity={0.7}
+    >
+      <Ionicons name={icon} size={16} color={color} />
+      <Text style={[s.actionBtnText, { color }]}>{label}</Text>
+    </TouchableOpacity>
+  );
+}
+
 // ════════════════════════════════════════════════════════════
 // Queue View — card-by-card verification
 // ════════════════════════════════════════════════════════════
@@ -641,17 +651,17 @@ function QueueView({
   updateItem, updatePrice, setUpdatePrice,
   updateCondition, setUpdateCondition, onUpdateConfirm,
 }) {
-  const item    = queue[cardIndex];
-  const done    = cardIndex;
-  const total   = queueTotal;
-  const pct     = total > 0 ? Math.round(done / total * 100) : 0;
+  const item      = queue[cardIndex];
+  const done      = cardIndex;
+  const total     = queueTotal;
+  const pct       = total > 0 ? Math.round(done / total * 100) : 0;
   const remaining = total - done;
 
   if (queueLoading && !item) {
     return (
       <View style={[s.container, { alignItems: 'center', justifyContent: 'center' }]}>
-        <ActivityIndicator color={ACCENT} size="large" />
-        <Text style={{ color: '#aaa', marginTop: 12 }}>Loading queue…</Text>
+        <ActivityIndicator color={C.accent} size="large" />
+        <Text style={{ color: C.text2, marginTop: 14 }}>Loading queue…</Text>
       </View>
     );
   }
@@ -659,11 +669,13 @@ function QueueView({
   if (!item) {
     return (
       <View style={[s.container, { alignItems: 'center', justifyContent: 'center', padding: 32 }]}>
-        <Text style={{ color: GREEN, fontSize: 48, marginBottom: 16 }}>✓</Text>
-        <Text style={{ color: '#fff', fontSize: 18, fontWeight: '700', marginBottom: 8 }}>
+        <View style={[s.doneCircle]}>
+          <Ionicons name="checkmark" size={40} color={C.green} />
+        </View>
+        <Text style={{ color: C.text, fontSize: 18, fontWeight: '700', marginBottom: 8 }}>
           Section complete
         </Text>
-        <Text style={{ color: '#666', textAlign: 'center', marginBottom: 24 }}>
+        <Text style={{ color: C.text2, textAlign: 'center', marginBottom: 28, lineHeight: 20 }}>
           All items in "{section?.section}" have been reviewed.
         </Text>
         <TouchableOpacity style={s.exitBtn} onPress={onExit}>
@@ -675,11 +687,10 @@ function QueueView({
 
   return (
     <View style={s.container}>
-
       {/* Header */}
       <View style={qv.header}>
-        <TouchableOpacity onPress={onExit}>
-          <Text style={qv.backBtn}>← Exit</Text>
+        <TouchableOpacity onPress={onExit} style={qv.backBtn}>
+          <Ionicons name="arrow-back" size={18} color={C.accent} />
         </TouchableOpacity>
         <Text style={qv.sectionName}>{section?.section}</Text>
         <Text style={qv.counter}>{done}/{total}</Text>
@@ -687,11 +698,11 @@ function QueueView({
 
       {/* Progress */}
       <View style={qv.progressRow}>
-        <ProgressBar pct={pct} color={ACCENT} />
-        <Text style={qv.pctLabel}>{remaining} left</Text>
+        <ProgressBar pct={pct} color={C.accent} />
+        <Text style={qv.remaining}>{remaining} left</Text>
       </View>
 
-      {/* Card */}
+      {/* Book card */}
       <ScrollView style={qv.cardScroll} contentContainerStyle={qv.cardContent}>
         <View style={qv.card}>
           <View style={qv.cardTop}>
@@ -703,43 +714,53 @@ function QueueView({
           <Text style={qv.author}>{item.author || ''}</Text>
 
           <View style={qv.metaRow}>
-            {item.isbn_13 && <Text style={qv.meta}>ISBN {item.isbn_13}</Text>}
-            {item.publication_year && <Text style={qv.meta}>{item.publication_year}</Text>}
-            {item.condition_grade && <Text style={qv.meta}>{item.condition_grade}</Text>}
+            {item.isbn_13 && <View style={qv.metaPill}><Text style={qv.metaText}>ISBN {item.isbn_13}</Text></View>}
+            {item.publication_year && <View style={qv.metaPill}><Text style={qv.metaText}>{item.publication_year}</Text></View>}
+            {item.condition_grade && <View style={qv.metaPill}><Text style={qv.metaText}>{item.condition_grade}</Text></View>}
             {item.asking_price && (
-              <Text style={[qv.meta, { color: GREEN }]}>${Number(item.asking_price).toFixed(2)}</Text>
+              <View style={[qv.metaPill, { backgroundColor: C.accentBg, borderColor: C.accent }]}>
+                <Text style={[qv.metaText, { color: C.accent, fontWeight: '700' }]}>
+                  ${Number(item.asking_price).toFixed(2)}
+                </Text>
+              </View>
             )}
           </View>
 
           {item.amazon_listing_id && (
-            <Text style={qv.sourceTag}>Amazon listing: {item.amazon_listing_id}</Text>
-          )}
-          {item.kz_status && (
-            <Text style={qv.sourceTag}>Ka-Zam: {item.kz_status}</Text>
+            <Text style={qv.sourceTag}>Amazon: {item.amazon_listing_id}</Text>
           )}
         </View>
       </ScrollView>
 
       {/* Action buttons */}
       <View style={qv.actions}>
-        <TouchableOpacity style={[qv.btn, { backgroundColor: GREEN }]} onPress={onFound}>
-          <Text style={qv.btnText}>✓ Found</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={[qv.btn, { backgroundColor: YELLOW + 'cc' }]} onPress={onFoundUpdate}>
-          <Text style={qv.btnText}>Found — Update</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={[qv.btn, { backgroundColor: RED }]} onPress={onNotFound}>
-          <Text style={qv.btnText}>Not Found</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={[qv.btn, { backgroundColor: INACTIVE }]} onPress={onSkip}>
-          <Text style={[qv.btnText, { color: '#aaa' }]}>Skip</Text>
-        </TouchableOpacity>
+        <View style={qv.actionRow}>
+          <TouchableOpacity style={[qv.btn, qv.foundBtn]} onPress={onFound}>
+            <Ionicons name="checkmark-circle" size={18} color={C.bg} />
+            <Text style={[qv.btnText, { color: C.bg }]}>Found</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={[qv.btn, qv.updateBtn]} onPress={onFoundUpdate}>
+            <Ionicons name="create-outline" size={18} color={C.yellow} />
+            <Text style={[qv.btnText, { color: C.yellow }]}>Found — Update</Text>
+          </TouchableOpacity>
+        </View>
+        <View style={qv.actionRow}>
+          <TouchableOpacity style={[qv.btn, qv.notFoundBtn]} onPress={onNotFound}>
+            <Ionicons name="close-circle" size={18} color={C.red} />
+            <Text style={[qv.btnText, { color: C.red }]}>Not Found</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={[qv.btn, qv.skipBtn]} onPress={onSkip}>
+            <Ionicons name="arrow-forward-circle-outline" size={18} color={C.text3} />
+            <Text style={[qv.btnText, { color: C.text3 }]}>Skip</Text>
+          </TouchableOpacity>
+        </View>
       </View>
 
       {/* Found-Update modal */}
       <Modal visible={updateModal} transparent animationType="slide">
         <View style={s.modalOverlay}>
           <View style={s.modalSheet}>
+            <View style={s.sheetHandle} />
             <Text style={s.modalTitle}>Update & Confirm</Text>
             <Text style={s.modalSub}>{updateItem?.title}</Text>
 
@@ -750,12 +771,12 @@ function QueueView({
               onChangeText={setUpdatePrice}
               keyboardType="decimal-pad"
               placeholder="0.00"
-              placeholderTextColor="#444"
+              placeholderTextColor={C.text3}
             />
 
             <Text style={s.modalLabel}>Condition</Text>
             <View style={s.condRow}>
-              {['VG+','VG','G+','G','Fair','Poor'].map(c => (
+              {['VG+', 'VG', 'G+', 'G', 'Fair', 'Poor'].map(c => (
                 <TouchableOpacity
                   key={c}
                   style={[s.condChip, updateCondition === c && s.condChipActive]}
@@ -770,16 +791,15 @@ function QueueView({
 
             <View style={s.modalBtns}>
               <TouchableOpacity style={s.modalCancel} onPress={() => setUpdateModal(false)}>
-                <Text style={{ color: '#888' }}>Cancel</Text>
+                <Text style={{ color: C.text2, fontWeight: '600' }}>Cancel</Text>
               </TouchableOpacity>
               <TouchableOpacity style={s.modalConfirm} onPress={onUpdateConfirm}>
-                <Text style={{ color: '#fff', fontWeight: '700' }}>Confirm Found</Text>
+                <Text style={{ color: C.bg, fontWeight: '700' }}>Confirm Found</Text>
               </TouchableOpacity>
             </View>
           </View>
         </View>
       </Modal>
-
     </View>
   );
 }
@@ -791,51 +811,49 @@ function MissingView({ missing, loading, onResolve, onBack }) {
   return (
     <View style={s.container}>
       <View style={mv.header}>
-        <TouchableOpacity onPress={onBack}>
-          <Text style={mv.backBtn}>← Back</Text>
+        <TouchableOpacity onPress={onBack} style={mv.backBtn}>
+          <Ionicons name="arrow-back" size={18} color={C.accent} />
         </TouchableOpacity>
         <Text style={mv.title}>Missing Queue ({missing.length})</Text>
       </View>
 
       {loading ? (
-        <ActivityIndicator color={ACCENT} style={{ marginTop: 40 }} />
+        <ActivityIndicator color={C.accent} style={{ marginTop: 40 }} />
       ) : missing.length === 0 ? (
-        <View style={{ alignItems: 'center', marginTop: 60 }}>
-          <Text style={{ color: GREEN, fontSize: 32, marginBottom: 12 }}>✓</Text>
-          <Text style={{ color: '#aaa' }}>No missing items</Text>
+        <View style={{ alignItems: 'center', marginTop: 64 }}>
+          <Ionicons name="checkmark-circle" size={48} color={C.green} style={{ marginBottom: 12 }} />
+          <Text style={{ color: C.text2, fontSize: 15 }}>No missing items</Text>
         </View>
       ) : (
         <ScrollView contentContainerStyle={{ padding: 16, gap: 12 }}>
           {missing.map(item => (
             <View key={item.stock_item_id} style={mv.card}>
-              <Text style={mv.title2}>{item.title || '—'}</Text>
-              <Text style={mv.author}>{item.author || ''}</Text>
+              <Text style={mv.itemTitle}>{item.title || '—'}</Text>
+              <Text style={mv.itemAuthor}>{item.author || ''}</Text>
               <View style={mv.meta}>
                 <Text style={mv.metaTxt}>{item.gibson_sku}</Text>
                 {item.isbn_13 && <Text style={mv.metaTxt}>{item.isbn_13}</Text>}
                 {item.section && <Text style={mv.metaTxt}>{item.section}</Text>}
                 {item.asking_price && (
-                  <Text style={[mv.metaTxt, { color: GREEN }]}>${Number(item.asking_price).toFixed(2)}</Text>
+                  <Text style={[mv.metaTxt, { color: C.accent }]}>${Number(item.asking_price).toFixed(2)}</Text>
                 )}
                 <TierBadge tier={item.trust_tier || 1} />
               </View>
               <View style={mv.resRow}>
-                <TouchableOpacity style={[mv.resBtn, { borderColor: GREEN }]}
-                  onPress={() => onResolve(item, 'FOUND')}>
-                  <Text style={[mv.resTxt, { color: GREEN }]}>Found</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={[mv.resBtn, { borderColor: YELLOW }]}
-                  onPress={() => onResolve(item, 'SOLD_CONFIRMED')}>
-                  <Text style={[mv.resTxt, { color: YELLOW }]}>Sold</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={[mv.resBtn, { borderColor: BLUE }]}
-                  onPress={() => onResolve(item, 'RELOCATED')}>
-                  <Text style={[mv.resTxt, { color: BLUE }]}>Relocated</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={[mv.resBtn, { borderColor: '#555' }]}
-                  onPress={() => onResolve(item, 'WITHDRAWN')}>
-                  <Text style={[mv.resTxt, { color: '#555' }]}>Remove</Text>
-                </TouchableOpacity>
+                {[
+                  { label: 'Found',     action: 'FOUND',            color: C.green },
+                  { label: 'Sold',      action: 'SOLD_CONFIRMED',   color: C.yellow },
+                  { label: 'Relocated', action: 'RELOCATED',        color: C.blue },
+                  { label: 'Remove',    action: 'WITHDRAWN',        color: C.text3 },
+                ].map(({ label, action, color }) => (
+                  <TouchableOpacity
+                    key={action}
+                    style={[mv.resBtn, { borderColor: color }]}
+                    onPress={() => onResolve(item, action)}
+                  >
+                    <Text style={[mv.resTxt, { color }]}>{label}</Text>
+                  </TouchableOpacity>
+                ))}
               </View>
             </View>
           ))}
@@ -850,108 +868,136 @@ function MissingView({ missing, loading, onResolve, onBack }) {
 // Styles
 // ════════════════════════════════════════════════════════════
 const s = StyleSheet.create({
-  container: { flex: 1, backgroundColor: BG },
-  content:   { padding: 16, paddingBottom: 40 },
+  container: { flex: 1, backgroundColor: C.bg },
+  content:   { padding: 16, paddingBottom: 48 },
 
+  backLink: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 20 },
+  backLinkText: { color: C.accent, fontSize: 14 },
+  pageTitle:    { color: C.text, fontSize: 20, fontWeight: '700', marginBottom: 6 },
+  pageSubtitle: { color: C.text2, fontSize: 13, lineHeight: 20, marginBottom: 16 },
+
+  // Stats card
   statsCard: {
-    backgroundColor: CARD, borderRadius: 14,
+    backgroundColor: C.card, borderRadius: 14,
     padding: 16, marginBottom: 16,
-    borderWidth: 1, borderColor: '#1e1e2e',
+    borderWidth: 1, borderColor: C.border,
   },
-  statsTitle: { color: '#fff', fontSize: 16, fontWeight: '700', marginBottom: 12 },
-  statsRow:   { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 14 },
-  statsPct:   { color: '#aaa', fontSize: 12, width: 36, textAlign: 'right' },
-  statsGrid:  { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 12 },
-  statBox:    { alignItems: 'center', flex: 1 },
-  statVal:    { fontSize: 20, fontWeight: '700' },
-  statLabel:  { color: '#444', fontSize: 10, marginTop: 2 },
-  tierRow:    { flexDirection: 'row', justifyContent: 'space-between', flexWrap: 'wrap', gap: 4 },
-  tierLabel:  { color: '#555', fontSize: 11 },
-  tierVal:    { fontSize: 12, fontWeight: '700' },
+  statsHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 10 },
+  statsTitle:  { color: C.text, fontSize: 15, fontWeight: '700' },
+  statsPct:    { color: C.accent, fontSize: 18, fontWeight: '800' },
+  statsGrid:   { flexDirection: 'row', justifyContent: 'space-between', marginTop: 14, marginBottom: 4 },
+  statBox:     { alignItems: 'center', flex: 1 },
+  statVal:     { fontSize: 20, fontWeight: '700' },
+  statLabel:   { color: C.text3, fontSize: 10, marginTop: 3, textTransform: 'uppercase', letterSpacing: 0.4 },
+  divider:     { height: 1, backgroundColor: C.border, marginVertical: 12 },
+  tierRow:     { flexDirection: 'row', justifyContent: 'space-around' },
 
-  actionRow: { flexDirection: 'row', gap: 8, marginBottom: 20, flexWrap: 'wrap' },
+  // Action grid
+  actionGrid:  { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 20 },
   actionBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
     borderWidth: 1, borderRadius: 8,
-    paddingHorizontal: 12, paddingVertical: 8,
-    backgroundColor: 'transparent',
+    paddingHorizontal: 12, paddingVertical: 9,
   },
   actionBtnText: { fontSize: 12, fontWeight: '700' },
 
-  sectionHeader: { color: '#444', fontSize: 11, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 10 },
+  // Section list
+  sectionListHeader: {
+    flexDirection: 'row', alignItems: 'center',
+    justifyContent: 'space-between', marginBottom: 10,
+  },
+  sectionHeader: {
+    color: C.text3, fontSize: 11,
+    textTransform: 'uppercase', letterSpacing: 0.8,
+  },
   sectionCard: {
-    backgroundColor: CARD, borderRadius: 12,
+    backgroundColor: C.card, borderRadius: 12,
     padding: 14, marginBottom: 10,
-    borderWidth: 1, borderColor: '#1e1e2e',
+    borderWidth: 1, borderColor: C.border,
   },
+  sectionCardEmpty: { opacity: 0.55 },
   sectionTop:  { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8, alignItems: 'center' },
-  sectionName: { color: '#fff', fontSize: 15, fontWeight: '700' },
-  sectionPct:  { color: '#666', fontSize: 12 },
+  sectionName: { color: C.text, fontSize: 15, fontWeight: '600' },
+  sectionPct:  { color: C.text3, fontSize: 12 },
   sectionStats:{ flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: 8 },
-  sectionStat: { color: '#555', fontSize: 11 },
+  sectionStat: { color: C.text3, fontSize: 11 },
   sectionActions: { flexDirection: 'row', gap: 8, marginTop: 10 },
+  trashBtn: { padding: 4 },
   shelfScanBtn: {
-    flex: 2, backgroundColor: ACCENT + '22',
-    borderWidth: 1, borderColor: ACCENT,
-    borderRadius: 8, padding: 9, alignItems: 'center',
+    flex: 2, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
+    backgroundColor: C.accentBg, borderWidth: 1, borderColor: C.accent,
+    borderRadius: 8, padding: 9,
   },
-  shelfScanBtnText: { color: ACCENT, fontWeight: '700', fontSize: 13 },
+  shelfScanBtnText: { color: C.accent, fontWeight: '700', fontSize: 13 },
   tapThroughBtn: {
-    flex: 1, borderWidth: 1, borderColor: '#333',
+    flex: 1, borderWidth: 1, borderColor: C.border,
     borderRadius: 8, padding: 9, alignItems: 'center',
   },
-  tapThroughBtnText: { color: '#555', fontWeight: '600', fontSize: 12 },
+  tapThroughBtnText: { color: C.text2, fontWeight: '600', fontSize: 12 },
 
-  exitBtn: {
-    backgroundColor: '#1e1e2e', borderRadius: 10,
-    paddingHorizontal: 24, paddingVertical: 12,
+  // Completion circle
+  doneCircle: {
+    width: 80, height: 80, borderRadius: 40,
+    backgroundColor: C.greenBg, borderWidth: 2, borderColor: C.green,
+    alignItems: 'center', justifyContent: 'center', marginBottom: 20,
   },
-  exitBtnText: { color: '#fff', fontWeight: '600' },
+  exitBtn: {
+    backgroundColor: C.surface, borderRadius: 10,
+    paddingHorizontal: 24, paddingVertical: 12,
+    borderWidth: 1, borderColor: C.border,
+  },
+  exitBtnText: { color: C.text, fontWeight: '600', fontSize: 14 },
 
   // Modal
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'flex-end' },
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.75)', justifyContent: 'flex-end' },
   modalSheet: {
-    backgroundColor: '#13131f', borderTopLeftRadius: 20, borderTopRightRadius: 20,
-    padding: 24, paddingBottom: 40,
-    borderTopWidth: 1, borderColor: '#252535',
+    backgroundColor: C.card, borderTopLeftRadius: 24, borderTopRightRadius: 24,
+    padding: 24, paddingBottom: 48,
+    borderTopWidth: 1, borderColor: C.border,
   },
-  modalTitle: { color: '#fff', fontSize: 16, fontWeight: '700', marginBottom: 4 },
-  modalSub:   { color: '#666', fontSize: 13, marginBottom: 16 },
-  modalLabel: { color: '#555', fontSize: 12, marginBottom: 4, marginTop: 12 },
+  sheetHandle: {
+    width: 36, height: 4, borderRadius: 2,
+    backgroundColor: C.border, alignSelf: 'center', marginBottom: 20,
+  },
+  modalTitle:  { color: C.text, fontSize: 16, fontWeight: '700', marginBottom: 4 },
+  modalSub:    { color: C.text2, fontSize: 13, marginBottom: 16 },
+  modalLabel:  { color: C.text3, fontSize: 12, marginBottom: 6, marginTop: 14, textTransform: 'uppercase', letterSpacing: 0.5 },
   modalInput: {
-    backgroundColor: '#1a1a2a', borderWidth: 1, borderColor: '#252535',
+    backgroundColor: C.surface, borderWidth: 1, borderColor: C.border,
     borderRadius: 8, paddingHorizontal: 12, paddingVertical: 10,
-    color: '#fff', fontSize: 15,
+    color: C.text, fontSize: 15,
   },
-  condRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 4 },
+  condRow:     { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 4 },
   condChip: {
-    borderWidth: 1, borderColor: '#333', borderRadius: 16,
-    paddingHorizontal: 12, paddingVertical: 6,
+    borderWidth: 1, borderColor: C.border, borderRadius: 16,
+    paddingHorizontal: 12, paddingVertical: 6, backgroundColor: C.surface,
   },
-  condChipActive: { borderColor: ACCENT, backgroundColor: ACCENT + '22' },
-  condChipText: { color: '#555', fontSize: 12 },
-  condChipTextActive: { color: ACCENT, fontWeight: '700' },
-  modalBtns:    { flexDirection: 'row', gap: 12, marginTop: 20 },
-  modalCancel:  { flex: 1, padding: 14, alignItems: 'center', borderRadius: 10, backgroundColor: '#1a1a2a' },
-  modalConfirm: { flex: 2, padding: 14, alignItems: 'center', borderRadius: 10, backgroundColor: ACCENT },
+  condChipActive:     { borderColor: C.accent, backgroundColor: C.accentBg },
+  condChipText:       { color: C.text3, fontSize: 12 },
+  condChipTextActive: { color: C.accent, fontWeight: '700' },
+  modalBtns:    { flexDirection: 'row', gap: 10, marginTop: 22 },
+  modalCancel:  { flex: 1, padding: 14, alignItems: 'center', borderRadius: 10, backgroundColor: C.surface, borderWidth: 1, borderColor: C.border },
+  modalConfirm: { flex: 2, padding: 14, alignItems: 'center', borderRadius: 10, backgroundColor: C.accent },
 });
 
 const imp = StyleSheet.create({
   sourceRow: { flexDirection: 'row', gap: 10, marginBottom: 16 },
   sourceBtn: {
-    flex: 1, borderWidth: 1, borderColor: '#333', borderRadius: 10,
-    padding: 14, alignItems: 'center',
+    flex: 1, borderWidth: 1, borderColor: C.border, borderRadius: 10,
+    padding: 14, alignItems: 'center', backgroundColor: C.surface,
   },
-  sourceTxt: { color: '#555', fontWeight: '700', fontSize: 14 },
+  sourceTxt: { color: C.text3, fontWeight: '700', fontSize: 14 },
   uploadBtn: {
-    backgroundColor: ACCENT, borderRadius: 12,
-    padding: 16, alignItems: 'center', marginBottom: 20,
+    backgroundColor: C.accent, borderRadius: 12,
+    padding: 15, alignItems: 'center', marginBottom: 20,
+    flexDirection: 'row', justifyContent: 'center', gap: 8,
   },
-  uploadTxt: { color: '#fff', fontWeight: '700', fontSize: 15 },
+  uploadTxt: { color: C.bg, fontWeight: '700', fontSize: 15 },
   resultCard: {
-    backgroundColor: CARD, borderRadius: 12, padding: 16,
-    borderWidth: 1, borderColor: '#1e1e2e',
+    backgroundColor: C.card, borderRadius: 12, padding: 16,
+    borderWidth: 1, borderColor: C.border,
   },
-  resultTitle: { color: '#fff', fontSize: 15, fontWeight: '700', marginBottom: 12 },
+  resultTitle: { color: C.text, fontSize: 15, fontWeight: '700' },
   resultRow: { flexDirection: 'row', justifyContent: 'space-around' },
 });
 
@@ -959,47 +1005,60 @@ const qv = StyleSheet.create({
   header: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
     paddingHorizontal: 16, paddingTop: 56, paddingBottom: 12,
-    backgroundColor: BG,
+    backgroundColor: C.surface, borderBottomWidth: 1, borderBottomColor: C.border,
   },
-  backBtn:    { color: ACCENT, fontSize: 14 },
-  sectionName:{ color: '#fff', fontSize: 14, fontWeight: '700', flex: 1, textAlign: 'center' },
-  counter:    { color: '#555', fontSize: 12 },
-  progressRow:{ paddingHorizontal: 16, flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 12 },
-  pctLabel:   { color: '#555', fontSize: 11, width: 50, textAlign: 'right' },
+  backBtn:    { padding: 4 },
+  sectionName:{ color: C.text, fontSize: 14, fontWeight: '700', flex: 1, textAlign: 'center' },
+  counter:    { color: C.text3, fontSize: 12 },
+  progressRow:{ paddingHorizontal: 16, paddingVertical: 10, flexDirection: 'row', alignItems: 'center', gap: 10 },
+  remaining:  { color: C.text3, fontSize: 11, width: 48, textAlign: 'right' },
   cardScroll: { flex: 1, paddingHorizontal: 16 },
-  cardContent:{ paddingBottom: 16 },
+  cardContent:{ paddingVertical: 12 },
   card: {
-    backgroundColor: CARD, borderRadius: 14, padding: 20,
-    borderWidth: 1, borderColor: '#1e1e2e',
+    backgroundColor: C.card, borderRadius: 14, padding: 20,
+    borderWidth: 1, borderColor: C.border,
   },
-  cardTop:   { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 },
-  sku:       { color: '#444', fontSize: 12 },
-  title:     { color: '#fff', fontSize: 18, fontWeight: '700', lineHeight: 24, marginBottom: 6 },
-  author:    { color: '#888', fontSize: 14, marginBottom: 14 },
-  metaRow:   { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  meta:      { color: '#555', fontSize: 12, backgroundColor: '#1a1a2a', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6 },
-  sourceTag: { color: '#444', fontSize: 11, marginTop: 10 },
-  actions:   { padding: 16, paddingBottom: 36, gap: 10, backgroundColor: 'rgba(13,13,25,0.97)' },
-  btn:       { borderRadius: 12, padding: 14, alignItems: 'center' },
-  btnText:   { color: '#fff', fontWeight: '700', fontSize: 15 },
+  cardTop:  { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 },
+  sku:      { color: C.text3, fontSize: 11, fontFamily: 'monospace' },
+  title:    { color: C.text, fontSize: 18, fontWeight: '700', lineHeight: 25, marginBottom: 6 },
+  author:   { color: C.text2, fontSize: 14, marginBottom: 16 },
+  metaRow:  { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  metaPill: {
+    backgroundColor: C.surface, borderRadius: 6, borderWidth: 1, borderColor: C.border,
+    paddingHorizontal: 8, paddingVertical: 3,
+  },
+  metaText: { color: C.text2, fontSize: 12 },
+  sourceTag:{ color: C.text3, fontSize: 11, marginTop: 12 },
+
+  actions: { padding: 14, paddingBottom: 32, gap: 8, backgroundColor: C.surface, borderTopWidth: 1, borderTopColor: C.border },
+  actionRow: { flexDirection: 'row', gap: 8 },
+  btn: {
+    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+    gap: 6, borderRadius: 12, padding: 13, borderWidth: 1,
+  },
+  foundBtn:    { backgroundColor: C.greenBg,  borderColor: C.green },
+  updateBtn:   { backgroundColor: C.yellowBg, borderColor: C.yellow },
+  notFoundBtn: { backgroundColor: C.redBg,    borderColor: C.red },
+  skipBtn:     { backgroundColor: C.surface,  borderColor: C.border },
+  btnText:     { fontWeight: '700', fontSize: 14 },
 });
 
 const mv = StyleSheet.create({
   header: {
-    flexDirection: 'row', alignItems: 'center', gap: 16,
+    flexDirection: 'row', alignItems: 'center', gap: 12,
     paddingHorizontal: 16, paddingTop: 56, paddingBottom: 16,
-    backgroundColor: BG,
+    backgroundColor: C.surface, borderBottomWidth: 1, borderBottomColor: C.border,
   },
-  backBtn: { color: ACCENT, fontSize: 14 },
-  title:   { color: '#fff', fontSize: 16, fontWeight: '700' },
+  backBtn: { padding: 4 },
+  title:   { color: C.text, fontSize: 16, fontWeight: '700' },
   card: {
-    backgroundColor: CARD, borderRadius: 12, padding: 14,
-    borderWidth: 1, borderColor: '#1e1e2e',
+    backgroundColor: C.card, borderRadius: 12, padding: 14,
+    borderWidth: 1, borderColor: C.border,
   },
-  title2:  { color: '#fff', fontSize: 15, fontWeight: '700', marginBottom: 4 },
-  author:  { color: '#888', fontSize: 13, marginBottom: 10 },
+  itemTitle:  { color: C.text, fontSize: 15, fontWeight: '600', marginBottom: 3 },
+  itemAuthor: { color: C.text2, fontSize: 13, marginBottom: 10 },
   meta:    { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 12, alignItems: 'center' },
-  metaTxt: { color: '#555', fontSize: 11 },
+  metaTxt: { color: C.text3, fontSize: 11 },
   resRow:  { flexDirection: 'row', gap: 8, flexWrap: 'wrap' },
   resBtn:  { borderWidth: 1, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6 },
   resTxt:  { fontSize: 11, fontWeight: '700' },
