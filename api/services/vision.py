@@ -34,14 +34,9 @@ async def identify_from_image(
     """
     start = time.time()
 
-    # Step 1: OCR ensemble
-    from api.services.ocr import run_ocr_pipeline
-    ocr_result = await run_ocr_pipeline(image_base64)
-
-    # Step 2: Claude Vision — Haiku first, escalate to Sonnet if confidence is low
+    # Claude Vision reads the cover directly — no OCR pre-processing needed
     extraction = await call_claude_vision(
         image_base64=image_base64,
-        ocr_text=ocr_result.get("text", ""),
         additional_images=additional_images,
     )
 
@@ -50,9 +45,9 @@ async def identify_from_image(
         extraction.overall_confidence < settings.vision_escalation_threshold
         and settings.anthropic_vision_escalation_model != settings.anthropic_vision_model
     ):
+        logger.info("Escalating to Sonnet (confidence=%.2f)", extraction.overall_confidence)
         extraction = await call_claude_vision(
             image_base64=image_base64,
-            ocr_text=ocr_result.get("text", ""),
             additional_images=additional_images,
             model_override=settings.anthropic_vision_escalation_model,
         )
@@ -123,7 +118,6 @@ async def identify_from_image(
 
 async def call_claude_vision(
     image_base64: str,
-    ocr_text: str,
     additional_images: list[str] = [],
     model_override: Optional[str] = None,
 ) -> VisionExtractionResult:
@@ -184,10 +178,8 @@ async def call_claude_vision(
 You have been given {len(image_labels)} image(s) of a book:
 {images_description}
 
-Use ALL provided images together with the OCR text to extract the most accurate bibliographic information possible.
+Use ALL provided images to extract the most accurate bibliographic information possible.
 The title page and copyright page (when provided) are authoritative — prefer them over the cover for title, author, publisher, and year.
-
-OCR text extracted from cover: {ocr_text}
 
 Return a JSON object with these fields:
 - title: string (the book's title)
