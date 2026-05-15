@@ -141,8 +141,8 @@ export default function SettingsScreen() {
                       {store.prefix}
                     </Text>
                   </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={[s.storeName, active && s.storeNameActive]}>
+                  <View style={{ flex: 1, minWidth: 0 }}>
+                    <Text style={[s.storeName, active && s.storeNameActive]} numberOfLines={1} ellipsizeMode="tail">
                       {store.name}
                     </Text>
                     <View style={s.storeMetaRow}>

@@ -63,6 +63,8 @@ export default function ScanScreen() {
     try {
       const result = await api.scanBarcode(data);
       if (result.title) {
+        // Delay torch off slightly so the scan confirmation feels responsive
+        setTimeout(() => setTorch(false), 500);
         if (result.copies?.length > 1) {
           setCopyPickerResult(result);
         } else {
@@ -117,6 +119,7 @@ export default function ScanScreen() {
         const [cover, title, copyright] = next;
         const result = await api.identifyPhoto(cover.base64, [title.base64, copyright.base64]);
         if (knownIsbn && !result.isbn_13) result.isbn_13 = knownIsbn;
+        setTimeout(() => setTorch(false), 500);
         router.push({ pathname: '/identify', params: { result: JSON.stringify(result), coverUri: cover.uri } });
         resetPhotoFlow();
       }
@@ -193,6 +196,25 @@ export default function ScanScreen() {
         </View>
       )}
 
+      {/* ── Photo alignment guide ── */}
+      {mode === 'photo' && !processing && (
+        <View style={s.photoGuideWrap} pointerEvents="none">
+          <View style={s.photoGuideFrame}>
+            {/* Four corner markers — subtle L-shapes */}
+            <View style={[s.corner, s.cornerTL]} />
+            <View style={[s.corner, s.cornerTR]} />
+            <View style={[s.corner, s.cornerBL]} />
+            <View style={[s.corner, s.cornerBR]} />
+            {/* Centre step label */}
+            <Text style={s.guideLabelText}>
+              {photoStep === 0 ? 'book cover'
+                : photoStep === 1 ? 'title page'
+                : 'copyright page'}
+            </Text>
+          </View>
+        </View>
+      )}
+
       {/* ── Loading overlay ── */}
       {(loading || processing) && (
         <View style={s.loadingOverlay} pointerEvents="none">
@@ -261,6 +283,7 @@ export default function ScanScreen() {
                 try {
                   const [cover, ...rest] = photos;
                   const result = await api.identifyPhoto(cover.base64, rest.map(p => p.base64));
+                  setTimeout(() => setTorch(false), 500);
                   router.push({ pathname: '/identify', params: { result: JSON.stringify(result), coverUri: cover.uri } });
                   resetPhotoFlow();
                 } catch (e) {
@@ -407,7 +430,7 @@ const s = StyleSheet.create({
   torchBtnActive: { backgroundColor: C.yellow, borderColor: C.yellow },
   torchIcon: { fontSize: 15 },
 
-  // Crosshair
+  // Barcode crosshair
   crosshair: {
     position: 'absolute', top: 0, left: 0, right: 0, bottom: 100,
     alignItems: 'center', justifyContent: 'center',
@@ -419,6 +442,32 @@ const s = StyleSheet.create({
     borderRadius: 10, opacity: 0.9,
   },
   crosshairLabel: { color: 'rgba(255,255,255,0.7)', marginTop: 12, fontSize: 12, letterSpacing: 0.3 },
+
+  // Photo alignment guide
+  photoGuideWrap: {
+    position: 'absolute', top: 96, left: 0, right: 0, bottom: 210,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  photoGuideFrame: {
+    width: 230, height: 320,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  // L-shaped corner markers — 2px lines, 28px long, amber at 60% opacity
+  corner: {
+    position: 'absolute',
+    width: 28, height: 28,
+    borderColor: 'rgba(200,144,46,0.65)',
+    borderWidth: 2,
+  },
+  cornerTL: { top: 0, left: 0, borderRightWidth: 0, borderBottomWidth: 0, borderTopLeftRadius: 3 },
+  cornerTR: { top: 0, right: 0, borderLeftWidth: 0, borderBottomWidth: 0, borderTopRightRadius: 3 },
+  cornerBL: { bottom: 0, left: 0, borderRightWidth: 0, borderTopWidth: 0, borderBottomLeftRadius: 3 },
+  cornerBR: { bottom: 0, right: 0, borderLeftWidth: 0, borderTopWidth: 0, borderBottomRightRadius: 3 },
+  guideLabelText: {
+    color: 'rgba(255,255,255,0.38)',
+    fontSize: 11, letterSpacing: 0.8,
+    textTransform: 'uppercase',
+  },
 
   // Loading overlay
   loadingOverlay: {
