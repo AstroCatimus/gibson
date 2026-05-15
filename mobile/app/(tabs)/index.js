@@ -32,6 +32,7 @@ export default function ScanScreen() {
   const [mode, setMode]       = useState('barcode');
   const [loading, setLoading] = useState(false);
   const [manualIsbn, setManualIsbn] = useState('');
+  const [torch, setTorch]     = useState(false);
 
   // Multi-step photo state
   const [photoStep, setPhotoStep]     = useState(0);
@@ -172,11 +173,12 @@ export default function ScanScreen() {
         ref={cameraRef}
         style={StyleSheet.absoluteFill}
         facing="back"
+        enableTorch={torch}
         onBarcodeScanned={mode === 'barcode' ? handleBarcode : undefined}
         barcodeScannerSettings={{ barcodeTypes: ['ean13', 'ean8', 'upc_a', 'upc_e'] }}
       />
 
-      {/* Mode selector */}
+      {/* Mode selector + torch */}
       <View style={s.modeBar}>
         {['barcode', 'photo', 'manual'].map((m) => (
           <TouchableOpacity
@@ -189,6 +191,12 @@ export default function ScanScreen() {
             </Text>
           </TouchableOpacity>
         ))}
+        <TouchableOpacity
+          style={[s.modeBtn, torch && s.modeBtnActive]}
+          onPress={() => setTorch(t => !t)}
+        >
+          <Text style={[s.modeBtnText, torch && s.modeBtnTextActive]}>⚡</Text>
+        </TouchableOpacity>
       </View>
 
       {/* Barcode frame */}

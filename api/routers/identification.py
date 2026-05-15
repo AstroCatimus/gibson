@@ -169,6 +169,20 @@ async def standard_path_photo(
                 "Research agent failed, using vision-only result: %s", str(e)
             )
 
+    # Step 3 — Pricing fallback: if research didn't return a price but we have an ISBN, hit aggregator directly
+    if not result.suggested_price and result.isbn_13:
+        try:
+            from api.services.pricing.aggregator import get_pricing
+            pricing = await get_pricing(isbn_13=result.isbn_13)
+            if pricing and pricing.suggested_price:
+                result.suggested_price = pricing.suggested_price
+                result.price_range = {
+                    "low": pricing.price_range_low,
+                    "high": pricing.price_range_high,
+                }
+        except Exception:
+            pass
+
     # Routing decision
     if result.confidence >= 0.85:
         result.routing_decision = "confirm"
