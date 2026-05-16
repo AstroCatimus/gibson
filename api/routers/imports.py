@@ -309,52 +309,245 @@ async def _upsert(parsed: dict, store_id: str, store_prefix: str,
     return "created"
 
 
-# ── Background processors ────────────────────────────────────────
-BATCH_SIZE = 25  # concurrent rows per batch — safe for Supabase connection limits
+# ── Bulk import pipeline ─────────────────────────────────────────
+# ~9 DB round trips regardless of file size.
+# Old row-by-row approach was 6 × N round trips (600k for 100k rows).
 
 async def _process(job: dict, content: bytes, parser, trust_tier: int):
+    import uuid as _uuid
+    from api.services.barcode import normalize_isbn_13
+
     store_id = job["store_id"]
+    source   = job["source"]
+
     try:
+        # ── 1. Parse all rows in memory ──────────────────────────────
         text = content.decode("utf-8", errors="replace")
-        reader = list(csv.DictReader(io.StringIO(text), delimiter="\t"))
-        job["total"] = len(reader)
+        parsed_all = [
+            p for p in (parser(row) for row in csv.DictReader(io.StringIO(text), delimiter="\t"))
+            if p is not None
+        ]
+        for p in parsed_all:
+            p["isbn_13"] = normalize_isbn_13(p["isbn"])
+        parsed_all = [p for p in parsed_all if p["isbn_13"]]
 
-        prefix_row = await fetchrow(
-            "SELECT prefix FROM gibson_store WHERE store_id = $1", store_id
+        job["total"] = len(parsed_all)
+        if not parsed_all:
+            job.update(status="done", done=True, pct=100)
+            return
+
+        # ── 2. Idempotency — one query for all external_ids ──────────
+        ext_ids = [p["external_id"] for p in parsed_all if p.get("external_id")]
+        already_done: set = set()
+        if ext_ids:
+            found = await fetch(
+                "SELECT external_id FROM gibson_source_record "
+                "WHERE external_id = ANY($1) AND source = $2",
+                ext_ids, source,
+            )
+            already_done = {r["external_id"] for r in found}
+
+        parsed = [
+            p for p in parsed_all
+            if not p.get("external_id") or p["external_id"] not in already_done
+        ]
+        job["skipped"] = len(parsed_all) - len(parsed)
+        job["pct"] = 10
+
+        if not parsed:
+            job.update(status="done", done=True, pct=100, processed=job["total"])
+            return
+
+        # ── 3. Find existing editions — one query for all ISBNs ──────
+        all_isbns = list({p["isbn_13"] for p in parsed})
+        ed_rows = await fetch(
+            "SELECT isbn_13, edition_id FROM gibson_edition WHERE isbn_13 = ANY($1)",
+            all_isbns,
         )
-        store_prefix = prefix_row["prefix"] if prefix_row else "GS"
+        edition_map: dict = {r["isbn_13"]: str(r["edition_id"]) for r in ed_rows}
+        job["pct"] = 20
 
-        edition_cache: dict = {}
-        cache_lock = asyncio.Lock()
+        # ── 4. Bulk-create missing works + editions ───────────────────
+        # One representative row per new ISBN (first occurrence wins for title/author)
+        new_isbn_rep: dict = {}
+        for p in parsed:
+            if p["isbn_13"] not in edition_map and p["isbn_13"] not in new_isbn_rep:
+                new_isbn_rep[p["isbn_13"]] = p
 
-        # Process in batches of BATCH_SIZE rows concurrently
-        for batch_start in range(0, len(reader), BATCH_SIZE):
-            batch = reader[batch_start:batch_start + BATCH_SIZE]
+        if new_isbn_rep:
+            isbn_list    = list(new_isbn_rep.keys())
+            # Pre-assign work UUIDs so we can link editions without relying on
+            # RETURNING row order — join on isbn_13 instead.
+            pre_wids     = [str(_uuid.uuid4()) for _ in isbn_list]
+            titles       = [new_isbn_rep[i].get("title") or "Untitled" for i in isbn_list]
+            title_sorts  = [
+                re.sub(r"^(the|a|an)\s+", "",
+                       (new_isbn_rep[i].get("title") or "untitled").lower()).strip()
+                for i in isbn_list
+            ]
 
-            async def _handle_row(i, row):
-                try:
-                    parsed = parser(row)
-                    if parsed is None:
-                        _tick(job, "skipped", i + 1)
-                        return
-                    result = await _upsert(parsed, store_id, store_prefix, trust_tier, edition_cache, cache_lock)
-                    _tick(job, result, i + 1)
-                except Exception as e:
-                    _tick(job, "error", i + 1, str(e)[:120])
+            await execute(
+                "INSERT INTO gibson_work (work_id, title, title_sort, work_type) "
+                "SELECT * FROM unnest($1::uuid[], $2::text[], $3::text[], $4::text[])",
+                pre_wids, titles, title_sorts, ["monograph"] * len(isbn_list),
+            )
+            new_eds = await fetch(
+                "INSERT INTO gibson_edition (work_id, isbn_13) "
+                "SELECT * FROM unnest($1::uuid[], $2::text[]) "
+                "RETURNING isbn_13, edition_id",
+                pre_wids, isbn_list,
+            )
+            for r in new_eds:
+                edition_map[r["isbn_13"]] = str(r["edition_id"])
 
-            await asyncio.gather(*[
-                _handle_row(batch_start + i, row)
-                for i, row in enumerate(batch)
-            ])
+            # Bulk authors — Ka-Zam provides these; Amazon doesn't
+            author_pairs = [
+                (pre_wids[i], new_isbn_rep[isbn]["author"])
+                for i, isbn in enumerate(isbn_list)
+                if new_isbn_rep[isbn].get("author")
+            ]
+            if author_pairs:
+                unique_authors = list({a for _, a in author_pairs})
+                ex_agents = await fetch(
+                    "SELECT agent_id, name_display FROM gibson_agent "
+                    "WHERE name_display = ANY($1)",
+                    unique_authors,
+                )
+                agent_map: dict = {r["name_display"]: str(r["agent_id"]) for r in ex_agents}
 
-        job["status"] = "done"
-        job["done"] = True
-        job["pct"] = 100
+                new_authors = [a for a in unique_authors if a not in agent_map]
+                if new_authors:
+                    name_sorts = [
+                        (lambda p: f"{p[-1]}, {p[0]}" if len(p) > 1 else p[0])(a.rsplit(" ", 1))
+                        for a in new_authors
+                    ]
+                    ag_rows = await fetch(
+                        "INSERT INTO gibson_agent (name_display, name_sort, agent_type) "
+                        "SELECT * FROM unnest($1::text[], $2::text[], $3::text[]) "
+                        "RETURNING agent_id, name_display",
+                        new_authors, name_sorts, ["person"] * len(new_authors),
+                    )
+                    for r in ag_rows:
+                        agent_map[r["name_display"]] = str(r["agent_id"])
+
+                wa_wids = [wid for wid, a in author_pairs if a in agent_map]
+                wa_aids = [agent_map[a] for _, a in author_pairs if a in agent_map]
+                if wa_wids:
+                    await execute(
+                        "INSERT INTO gibson_work_agent (work_id, agent_id, role, role_order) "
+                        "SELECT * FROM unnest($1::uuid[], $2::uuid[], $3::text[], $4::int[]) "
+                        "ON CONFLICT DO NOTHING",
+                        wa_wids, wa_aids, ["author"] * len(wa_wids), [1] * len(wa_wids),
+                    )
+
+        job["pct"] = 40
+
+        # ── 5. Locations — 2 queries ──────────────────────────────────
+        unique_sections = list({p["section"] for p in parsed if p.get("section")})
+        location_map: dict = {}
+        if unique_sections:
+            ex_locs = await fetch(
+                "SELECT location_id, section FROM gibson_location "
+                "WHERE store_id = $1 AND section = ANY($2)",
+                store_id, unique_sections,
+            )
+            location_map = {r["section"]: str(r["location_id"]) for r in ex_locs}
+
+            new_secs = [s for s in unique_sections if s not in location_map]
+            if new_secs:
+                new_locs = await fetch(
+                    "INSERT INTO gibson_location (store_id, section, section_code) "
+                    "SELECT * FROM unnest($1::uuid[], $2::text[], $3::text[]) "
+                    "RETURNING location_id, section",
+                    [store_id] * len(new_secs),
+                    new_secs,
+                    [s[:6].upper().replace(" ", "") for s in new_secs],
+                )
+                for r in new_locs:
+                    location_map[r["section"]] = str(r["location_id"])
+
+        job["pct"] = 50
+
+        # ── 6. Allocate all SKUs in one query ─────────────────────────
+        n = len(parsed)
+        seq_rows = await fetch(
+            "SELECT nextval('gibson_sku_seq') AS seq FROM generate_series(1, $1)", n
+        )
+        skus = [f"IMP-{r['seq']}" for r in seq_rows]
+        job["pct"] = 60
+
+        # ── 7. Bulk insert stock items — one query ────────────────────
+        ed_ids, sku_l, sid_l, cond_l, mode_l = [], [], [], [], []
+        price_l, loc_l, tier_l, vstat_l      = [], [], [], []
+        azid_l, asin_l                        = [], []
+        valid: list = []
+
+        for p, sku in zip(parsed, skus):
+            eid = edition_map.get(p["isbn_13"])
+            if not eid:
+                job["errors"] += 1
+                continue
+            ed_ids.append(eid);       sku_l.append(sku)
+            sid_l.append(store_id);   cond_l.append(p["condition"])
+            mode_l.append("tap");     price_l.append(p.get("price"))
+            loc_l.append(location_map.get(p.get("section") or ""))
+            tier_l.append(trust_tier); vstat_l.append("UNVERIFIED")
+            azid_l.append(p.get("external_id") if p["source"] == "amazon" else None)
+            asin_l.append(p.get("asin") or None)
+            valid.append(p)
+
+        item_rows = []
+        if ed_ids:
+            item_rows = await fetch(
+                """
+                INSERT INTO gibson_stock_item (
+                    edition_id, gibson_sku, store_id,
+                    condition_grade, condition_mode,
+                    asking_price, location_id,
+                    trust_tier, shelf_verification_status,
+                    amazon_listing_id, amazon_asin
+                )
+                SELECT * FROM unnest(
+                    $1::uuid[],  $2::text[],  $3::uuid[],
+                    $4::text[],  $5::text[],
+                    $6::float8[], $7::uuid[],
+                    $8::int[],   $9::text[],
+                    $10::text[], $11::text[]
+                )
+                RETURNING stock_item_id
+                """,
+                ed_ids, sku_l, sid_l,
+                cond_l, mode_l,
+                price_l, loc_l,
+                tier_l, vstat_l,
+                azid_l, asin_l,
+            )
+
+        job["pct"] = 80
+
+        # ── 8. Bulk insert source records — one query ─────────────────
+        if item_rows:
+            await execute(
+                "INSERT INTO gibson_source_record "
+                "    (source, external_id, isbn_norm, raw_data, stock_item_id) "
+                "SELECT * FROM unnest($1::text[], $2::text[], $3::text[], $4::jsonb[], $5::uuid[])",
+                [p["source"] for p in valid],
+                [p.get("external_id") or None for p in valid],
+                [p["isbn_13"] for p in valid],
+                [json.dumps({"title": p.get("title"), "source": p["source"]}) for p in valid],
+                [str(r["stock_item_id"]) for r in item_rows],
+            )
+
+        job["created"]   = len(item_rows)
+        job["processed"] = job["total"]
+        job["pct"]       = 100
+        job["status"]    = "done"
+        job["done"]      = True
 
     except Exception as e:
         job["status"] = "failed"
-        job["done"] = True
-        job["error_details"].append({"row": 0, "error": str(e)})
+        job["done"]   = True
+        job["error_details"].append({"row": 0, "error": str(e)[:200]})
 
 
 # ── Endpoints ────────────────────────────────────────────────────
@@ -436,10 +629,9 @@ async def _process_queue_item(queue_id: str) -> None:
 
     logger.info("Processing import queue item %s (%s / %s)", queue_id, row["source"], row["filename"])
 
-    parser = _parse_amazon if row["source"] == "amazon" else _parse_kazam
+    parser     = _parse_amazon if row["source"] == "amazon" else _parse_kazam
     trust_tier = 2 if row["source"] == "amazon" else 3
 
-    # Build a synthetic job dict so we can reuse _process() unchanged
     job = {
         "job_id": queue_id, "source": row["source"], "store_id": str(row["store_id"]),
         "status": "running", "done": False,
@@ -448,8 +640,7 @@ async def _process_queue_item(queue_id: str) -> None:
         "pct": 0, "error_details": [],
     }
 
-    async def _flush_progress():
-        """Write current job counters to the DB row every ~2 s during processing."""
+    async def _flush():
         await execute(
             """
             UPDATE gibson_import_queue
@@ -464,12 +655,22 @@ async def _process_queue_item(queue_id: str) -> None:
             json.dumps(job["error_details"]),
         )
 
+    # Flush progress every 3s while _process runs — mobile sees live updates
+    async def _periodic_flush():
+        try:
+            while not job["done"]:
+                await asyncio.sleep(3)
+                await _flush()
+        except asyncio.CancelledError:
+            pass
+
+    flush_task = asyncio.create_task(_periodic_flush())
+
     try:
         content = await _download_from_storage(row["storage_path"])
-
-        # Run the existing batch processor — it mutates `job` in place
         await _process(job, content, parser, trust_tier)
 
+        flush_task.cancel()
         final_status = "DONE" if job["status"] == "done" else "FAILED"
         await execute(
             """
@@ -490,6 +691,7 @@ async def _process_queue_item(queue_id: str) -> None:
         )
 
     except Exception as exc:
+        flush_task.cancel()
         logger.exception("Queue item %s failed: %s", queue_id, exc)
         await execute(
             """
