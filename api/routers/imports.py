@@ -322,7 +322,13 @@ async def _process(job: dict, content: bytes, parser, trust_tier: int):
 
     try:
         # ── 1. Parse all rows in memory ──────────────────────────────
-        text = content.decode("utf-8", errors="replace")
+        # Normalize line endings and strip null bytes.
+        # Amazon files often have \r\n (Windows) or bare \r, and occasionally
+        # contain 0x00 bytes that PostgreSQL rejects as invalid UTF-8.
+        text = (content.decode("utf-8", errors="replace")
+                .replace('\x00', '')
+                .replace('\r\n', '\n')
+                .replace('\r', '\n'))
         parsed_all = [
             p for p in (parser(row) for row in csv.DictReader(io.StringIO(text), delimiter="\t"))
             if p is not None
@@ -496,9 +502,15 @@ async def _process(job: dict, content: bytes, parser, trust_tier: int):
             asin_l.append(p.get("asin") or None)
             valid.append(p)
 
+        # ── 7+8. Chunked stock items + source records ─────────────────
+        # Insert in chunks of 5k to stay well within asyncpg/Postgres message
+        # size limits (large files with long titles can exceed them in one shot).
+        CHUNK = 5_000
         item_rows = []
-        if ed_ids:
-            item_rows = await fetch(
+
+        for start in range(0, len(ed_ids), CHUNK):
+            sl = slice(start, start + CHUNK)
+            chunk_items = await fetch(
                 """
                 INSERT INTO gibson_stock_item (
                     edition_id, gibson_sku, store_id,
@@ -516,26 +528,25 @@ async def _process(job: dict, content: bytes, parser, trust_tier: int):
                 )
                 RETURNING stock_item_id
                 """,
-                ed_ids, sku_l, sid_l,
-                cond_l, mode_l,
-                price_l, loc_l,
-                tier_l, vstat_l,
-                azid_l, asin_l,
+                ed_ids[sl], sku_l[sl], sid_l[sl],
+                cond_l[sl], mode_l[sl],
+                price_l[sl], loc_l[sl],
+                tier_l[sl], vstat_l[sl],
+                azid_l[sl], asin_l[sl],
             )
+            item_rows.extend(chunk_items)
+            job["pct"] = 60 + round(20 * (start + len(chunk_items)) / max(len(ed_ids), 1))
 
-        job["pct"] = 80
-
-        # ── 8. Bulk insert source records — one query ─────────────────
-        if item_rows:
+            valid_sl  = valid[sl]
             await execute(
                 "INSERT INTO gibson_source_record "
                 "    (source, external_id, isbn_norm, raw_data, stock_item_id) "
                 "SELECT * FROM unnest($1::text[], $2::text[], $3::text[], $4::jsonb[], $5::uuid[])",
-                [p["source"] for p in valid],
-                [p.get("external_id") or None for p in valid],
-                [p["isbn_13"] for p in valid],
-                [json.dumps({"title": p.get("title"), "source": p["source"]}) for p in valid],
-                [str(r["stock_item_id"]) for r in item_rows],
+                [p["source"] for p in valid_sl],
+                [p.get("external_id") or None for p in valid_sl],
+                [p["isbn_13"] for p in valid_sl],
+                [json.dumps({"title": p.get("title"), "source": p["source"]}) for p in valid_sl],
+                [str(r["stock_item_id"]) for r in chunk_items],
             )
 
         job["created"]   = len(item_rows)
@@ -547,7 +558,7 @@ async def _process(job: dict, content: bytes, parser, trust_tier: int):
     except Exception as e:
         job["status"] = "failed"
         job["done"]   = True
-        job["error_details"].append({"row": 0, "error": str(e)[:200]})
+        job["error_details"].append({"row": 0, "error": repr(e)[:400]})
 
 
 # ── Endpoints ────────────────────────────────────────────────────
