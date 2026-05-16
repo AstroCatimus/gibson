@@ -6,7 +6,7 @@
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
-  View, Text, StyleSheet, ScrollView, TouchableOpacity,
+  View, Text, StyleSheet, ScrollView, FlatList, TouchableOpacity,
   ActivityIndicator, Modal, TextInput, Alert, Linking,
 } from 'react-native';
 import * as DocumentPicker from 'expo-document-picker';
@@ -57,7 +57,8 @@ export default function DefragScreen() {
   const [stats, setStats]         = useState(null);
   const [sections, setSections]   = useState([]);
   const [loading, setLoading]     = useState(true);
-  const [showEmpty, setShowEmpty] = useState(false);
+  const [showEmpty, setShowEmpty]       = useState(false);
+  const [sectionFilter, setSectionFilter] = useState('');
 
   const [activeSection, setActiveSection]     = useState(null);
   const [sessionId, setSessionId]             = useState(null);
@@ -455,11 +456,15 @@ export default function DefragScreen() {
   }
 
   // ── Dashboard ─────────────────────────────────────────────────
-  const emptySections = sections.filter(sec => sec.total === 0);
+  const emptySections   = sections.filter(sec => sec.total === 0);
+  const filterLower     = sectionFilter.toLowerCase();
+  const visibleSections = sections.filter(sec =>
+    (showEmpty || sec.total > 0) &&
+    (!filterLower || sec.section?.toLowerCase().includes(filterLower))
+  );
 
-  return (
-    <ScrollView style={s.container} contentContainerStyle={s.content}>
-
+  const dashboardHeader = (
+    <View style={s.content}>
       {/* Stats card */}
       {loading ? (
         <ActivityIndicator color={C.accent} style={{ marginTop: 40 }} />
@@ -530,9 +535,14 @@ export default function DefragScreen() {
         />
       </View>
 
-      {/* Section list header */}
+      {/* Section list header + search */}
       <View style={s.sectionListHeader}>
-        <Text style={s.sectionHeader}>Sections</Text>
+        <Text style={s.sectionHeader}>
+          Sections
+          <Text style={{ color: C.text3, fontWeight: '400', fontSize: 13 }}>
+            {' '}({visibleSections.length})
+          </Text>
+        </Text>
         <View style={{ flexDirection: 'row', gap: 12, alignItems: 'center' }}>
           {emptySections.length > 0 && (
             <TouchableOpacity
@@ -556,9 +566,7 @@ export default function DefragScreen() {
                 );
               }}
             >
-              <Text style={{ color: C.red, fontSize: 12, fontWeight: '600' }}>
-                Clean up empty
-              </Text>
+              <Text style={{ color: C.red, fontSize: 12, fontWeight: '600' }}>Clean up empty</Text>
             </TouchableOpacity>
           )}
           <TouchableOpacity onPress={() => setShowEmpty(v => !v)}>
@@ -569,96 +577,108 @@ export default function DefragScreen() {
         </View>
       </View>
 
-      {loading ? null : sections
-        .filter(sec => showEmpty || sec.total > 0)
-        .map((sec) => {
-          const pct     = sec.total > 0 ? Math.round(sec.verified / sec.total * 100) : 0;
-          const isEmpty = sec.total === 0;
-          const hasQueue = sec.unverified > 0;
-          return (
-            <View
-              key={sec.location_id || sec.section}
-              style={[s.sectionCard, isEmpty && s.sectionCardEmpty]}
-            >
-              <View style={s.sectionTop}>
-                <Text style={[s.sectionName, isEmpty && { color: C.text3 }]}>{sec.section}</Text>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-                  {isEmpty ? (
-                    <TouchableOpacity
-                      style={s.trashBtn}
-                      onPress={() => {
-                        Alert.alert(
-                          'Delete Section',
-                          `Delete "${sec.section}"? It has no active inventory.`,
-                          [
-                            { text: 'Cancel', style: 'cancel' },
-                            {
-                              text: 'Delete', style: 'destructive',
-                              onPress: async () => {
-                                try {
-                                  await api.defragDeleteSection(sec.location_id);
-                                  loadDashboard();
-                                } catch (e) { Alert.alert('Error', e.message); }
-                              },
-                            },
-                          ]
-                        );
-                      }}
-                    >
-                      <Ionicons name="trash-outline" size={16} color={C.red} />
-                    </TouchableOpacity>
-                  ) : (
-                    <Text style={s.sectionPct}>{pct}%</Text>
-                  )}
-                </View>
-              </View>
+      <TextInput
+        style={s.sectionSearch}
+        placeholder="Search sections…"
+        placeholderTextColor={C.text3}
+        value={sectionFilter}
+        onChangeText={setSectionFilter}
+        clearButtonMode="while-editing"
+      />
+    </View>
+  );
 
-              {!isEmpty && <ProgressBar pct={pct} color={pct === 100 ? C.green : C.accent} />}
-
-              <View style={s.sectionStats}>
-                <Text style={s.sectionStat}>{sec.total} items</Text>
-                {sec.unverified > 0 && (
-                  <Text style={[s.sectionStat, { color: C.yellow }]}>{sec.unverified} to verify</Text>
-                )}
-                {sec.missing > 0 && (
-                  <Text style={[s.sectionStat, { color: C.red }]}>{sec.missing} missing</Text>
-                )}
-                {sec.tier2 > 0 && (
-                  <Text style={[s.sectionStat, { color: C.blue }]}>T2:{sec.tier2}</Text>
-                )}
-                {sec.tier3 > 0 && (
-                  <Text style={[s.sectionStat, { color: C.purple }]}>T3:{sec.tier3}</Text>
-                )}
-              </View>
-
-              {hasQueue && (
-                <View style={s.sectionActions}>
+  return (
+    <FlatList
+      style={s.container}
+      data={loading ? [] : visibleSections}
+      keyExtractor={sec => sec.location_id || sec.section}
+      ListHeaderComponent={dashboardHeader}
+      renderItem={({ item: sec }) => {
+        const pct      = sec.total > 0 ? Math.round(sec.verified / sec.total * 100) : 0;
+        const isEmpty  = sec.total === 0;
+        const hasQueue = sec.unverified > 0;
+        return (
+          <View style={[s.sectionCard, isEmpty && s.sectionCardEmpty, { marginHorizontal: 16 }]}>
+            <View style={s.sectionTop}>
+              <Text style={[s.sectionName, isEmpty && { color: C.text3 }]}>{sec.section}</Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                {isEmpty ? (
                   <TouchableOpacity
-                    style={s.shelfScanBtn}
-                    onPress={async () => {
-                      const sess = await api.defragStartSession(sec.section).catch(() => ({ session_id: null }));
-                      router.push({
-                        pathname: '/shelfscan',
-                        params: { section: sec.section, sessionId: sess.session_id || '' },
-                      });
+                    style={s.trashBtn}
+                    onPress={() => {
+                      Alert.alert(
+                        'Delete Section',
+                        `Delete "${sec.section}"? It has no active inventory.`,
+                        [
+                          { text: 'Cancel', style: 'cancel' },
+                          {
+                            text: 'Delete', style: 'destructive',
+                            onPress: async () => {
+                              try {
+                                await api.defragDeleteSection(sec.location_id);
+                                loadDashboard();
+                              } catch (e) { Alert.alert('Error', e.message); }
+                            },
+                          },
+                        ]
+                      );
                     }}
                   >
-                    <Ionicons name="camera-outline" size={15} color={C.accent} />
-                    <Text style={s.shelfScanBtnText}>Scan Shelf</Text>
+                    <Ionicons name="trash-outline" size={16} color={C.red} />
                   </TouchableOpacity>
-                  <TouchableOpacity style={s.tapThroughBtn} onPress={() => startSection(sec)}>
-                    <Text style={s.tapThroughBtnText}>Tap-Through</Text>
-                  </TouchableOpacity>
-                </View>
+                ) : (
+                  <Text style={s.sectionPct}>{pct}%</Text>
+                )}
+              </View>
+            </View>
+
+            {!isEmpty && <ProgressBar pct={pct} color={pct === 100 ? C.green : C.accent} />}
+
+            <View style={s.sectionStats}>
+              <Text style={s.sectionStat}>{sec.total} items</Text>
+              {sec.unverified > 0 && (
+                <Text style={[s.sectionStat, { color: C.yellow }]}>{sec.unverified} to verify</Text>
               )}
-              {!hasQueue && pct === 100 && !isEmpty && (
-                <Text style={[s.sectionStat, { color: C.green, marginTop: 6 }]}>✓ Complete</Text>
+              {sec.missing > 0 && (
+                <Text style={[s.sectionStat, { color: C.red }]}>{sec.missing} missing</Text>
+              )}
+              {sec.tier2 > 0 && (
+                <Text style={[s.sectionStat, { color: C.blue }]}>T2:{sec.tier2}</Text>
+              )}
+              {sec.tier3 > 0 && (
+                <Text style={[s.sectionStat, { color: C.purple }]}>T3:{sec.tier3}</Text>
               )}
             </View>
-          );
-        })
-      }
-    </ScrollView>
+
+            {hasQueue && (
+              <View style={s.sectionActions}>
+                <TouchableOpacity
+                  style={s.shelfScanBtn}
+                  onPress={async () => {
+                    const sess = await api.defragStartSession(sec.section).catch(() => ({ session_id: null }));
+                    router.push({
+                      pathname: '/shelfscan',
+                      params: { section: sec.section, sessionId: sess.session_id || '' },
+                    });
+                  }}
+                >
+                  <Ionicons name="camera-outline" size={15} color={C.accent} />
+                  <Text style={s.shelfScanBtnText}>Scan Shelf</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={s.tapThroughBtn} onPress={() => startSection(sec)}>
+                  <Text style={s.tapThroughBtnText}>Tap-Through</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+            {!hasQueue && pct === 100 && !isEmpty && (
+              <Text style={[s.sectionStat, { color: C.green, marginTop: 6 }]}>✓ Complete</Text>
+            )}
+          </View>
+        );
+      }}
+      ListFooterComponent={<View style={{ height: 40 }} />}
+    />
   );
 }
 
@@ -966,6 +986,11 @@ const s = StyleSheet.create({
   sectionListHeader: {
     flexDirection: 'row', alignItems: 'center',
     justifyContent: 'space-between', marginBottom: 10,
+  },
+  sectionSearch: {
+    backgroundColor: C.card, borderWidth: 1, borderColor: C.border,
+    borderRadius: 10, paddingHorizontal: 14, paddingVertical: 10,
+    color: C.text, fontSize: 14, marginBottom: 12,
   },
   sectionHeader: {
     color: C.text3, fontSize: 11,
