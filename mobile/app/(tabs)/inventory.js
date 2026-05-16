@@ -24,16 +24,22 @@ const STATUS_LABEL = {
   WITHDRAWN:    'Withdrawn',
 };
 
+const PAGE = 50;
+
 export default function InventoryScreen() {
   const [items, setItems]         = useState([]);
   const [stats, setStats]         = useState(null);
   const [query, setQuery]         = useState('');
   const [loading, setLoading]     = useState(true);
   const [searching, setSearching] = useState(false);
+  const [offset, setOffset]       = useState(0);
+  const [hasMore, setHasMore]     = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
 
   const [editing, setEditing]   = useState(null);
   const [sections, setSections] = useState([]);
   const [saving, setSaving]     = useState(false);
+  const [sectionSearch, setSectionSearch] = useState('');
 
   const [ePrice, setEPrice]         = useState('');
   const [eCondition, setECondition] = useState('');
@@ -46,19 +52,40 @@ export default function InventoryScreen() {
 
   async function loadAll() {
     setLoading(true);
+    setOffset(0);
+    setHasMore(true);
     try {
       const [inv, st, sec] = await Promise.all([
-        api.getInventory('?limit=50'),
+        api.getInventory(`?limit=${PAGE}&offset=0`),
         api.getInventoryStats(),
         api.getSections(),
       ]);
-      setItems(inv.items || inv || []);
+      const list = inv.items || inv || [];
+      setItems(list);
+      setOffset(list.length);
+      setHasMore(list.length === PAGE);
       setStats(st);
       setSections(sec.sections || []);
     } catch (e) {
       console.warn(e);
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function loadMore() {
+    if (loadingMore || !hasMore || query) return;
+    setLoadingMore(true);
+    try {
+      const inv  = await api.getInventory(`?limit=${PAGE}&offset=${offset}`);
+      const list = inv.items || inv || [];
+      setItems(prev => [...prev, ...list]);
+      setOffset(prev => prev + list.length);
+      setHasMore(list.length === PAGE);
+    } catch (e) {
+      console.warn(e);
+    } finally {
+      setLoadingMore(false);
     }
   }
 
@@ -81,6 +108,7 @@ export default function InventoryScreen() {
     setEStatus(item.status || 'AVAILABLE');
     setESigned(item.is_signed || false);
     setEInscribed(item.is_inscribed || false);
+    setSectionSearch('');
   }
 
   async function handleSave() {
@@ -218,6 +246,8 @@ export default function InventoryScreen() {
             data={items}
             keyExtractor={item => item.stock_item_id || String(Math.random())}
             renderItem={renderItem}
+            onEndReached={loadMore}
+            onEndReachedThreshold={0.3}
             contentContainerStyle={items.length === 0 ? s.emptyContainer : { paddingBottom: 20 }}
             ListEmptyComponent={
               <View style={s.emptyWrap}>
@@ -225,6 +255,11 @@ export default function InventoryScreen() {
                 <Text style={s.emptyTitle}>No books found</Text>
                 <Text style={s.emptyHint}>{query ? 'Try a different search' : 'Inventory is empty'}</Text>
               </View>
+            }
+            ListFooterComponent={
+              loadingMore
+                ? <ActivityIndicator color={C.accent} style={{ marginVertical: 16 }} />
+                : null
             }
           />
         )
@@ -303,21 +338,38 @@ export default function InventoryScreen() {
                 ))}
               </View>
 
-              {/* Section */}
+              {/* Section — searchable, not a 2k-item chipRow */}
               <Text style={s.fieldLabel}>Section</Text>
-              <View style={s.chipRow}>
-                {sections.map(loc => (
-                  <TouchableOpacity
-                    key={String(loc.location_id)}
-                    style={[s.chip, eSection === loc.section && s.chipActive]}
-                    onPress={() => setESection(loc.section)}
-                  >
-                    <Text style={[s.chipText, eSection === loc.section && s.chipTextActive]}>
-                      {loc.section}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
+              <TextInput
+                style={[s.input, { marginBottom: 8 }]}
+                value={sectionSearch || eSection}
+                onChangeText={t => { setSectionSearch(t); setESection(t); }}
+                placeholder="Type to search sections…"
+                placeholderTextColor={C.text3}
+              />
+              {sectionSearch.length > 0 && (
+                <View style={{ maxHeight: 160, borderRadius: 8, overflow: 'hidden',
+                               borderWidth: 1, borderColor: C.border, marginBottom: 8 }}>
+                  <FlatList
+                    data={sections
+                      .filter(l => l.section?.toLowerCase().includes(sectionSearch.toLowerCase()))
+                      .slice(0, 30)}
+                    keyExtractor={l => String(l.location_id)}
+                    renderItem={({ item: loc }) => (
+                      <TouchableOpacity
+                        style={{ padding: 12, borderBottomWidth: 1, borderBottomColor: C.border,
+                                 backgroundColor: eSection === loc.section ? C.accentBg : C.card }}
+                        onPress={() => { setESection(loc.section); setSectionSearch(''); }}
+                      >
+                        <Text style={{ color: eSection === loc.section ? C.accent : C.text, fontSize: 14 }}>
+                          {loc.section}
+                        </Text>
+                      </TouchableOpacity>
+                    )}
+                    keyboardShouldPersistTaps="handled"
+                  />
+                </View>
+              )}
 
               {/* Toggles */}
               <View style={s.toggleRow}>
