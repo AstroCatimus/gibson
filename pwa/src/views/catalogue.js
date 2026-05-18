@@ -1,7 +1,7 @@
 /**
  * Gibson Catalogue View — final confirmation before stock item creation.
  * Gibson prompts the logical choice. Dealer is always final.
- * One tap to confirm. Every override is a training signal.
+ * One tap to confirm. Every override is logged as a correction record.
  */
 
 Gibson.router.register('catalogue', function(container, params) {

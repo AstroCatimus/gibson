@@ -28,10 +28,6 @@ class Settings(BaseSettings):
     # Confidence threshold below which vision escalates from Haiku → Sonnet
     vision_escalation_threshold: float = 0.60
 
-    # Local LLM — reserved for future use; not active
-    # ollama_base_url: str = "http://localhost:11434"
-    # ollama_model: str = "llama3:8b"
-
     # Pricing
     booksrun_api_key: str = ""
     booksrun_affiliate_id: str = ""

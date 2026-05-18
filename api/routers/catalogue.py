@@ -173,7 +173,7 @@ async def confirm_and_catalogue(request: ConfirmIdentificationRequest):
     """
     Full confirmation flow: dealer taps confirm.
     Creates Work + Edition + Stock Item in a single transaction.
-    Logs any overrides as correction records (training signal).
+    Logs any overrides as correction records (audit trail).
     """
     # This is the most critical endpoint — creates the full catalog chain
     return {"status": "confirmed", "message": "Catalogue records created"}

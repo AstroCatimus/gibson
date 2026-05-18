@@ -59,7 +59,7 @@ Work → Edition → Stock Item → Sale
 ```
 
 **Key invariants:**
-- `source_record`: every external API response, Claude Vision output, MARC record preserved as JSONB. `is_training_pair`, `correction_of`, `correction_reason` fields required.
+- `source_record`: every external API response, Claude Vision output, MARC record preserved as JSONB. `correction_of`, `correction_reason` fields required.
 - `pricing_record`: NO `store_id` column by design. Cooperative privacy enforced at schema level.
 - `stock_item.cost_basis_at_acquisition`: only queryable from owning store dashboard.
 - SKU format: `{employee_initials}-{seq}` e.g. `KK-3412`. Global sequence, never reissued. Bulk imports use `IMP-{seq}`.
@@ -158,10 +158,6 @@ ANTHROPIC_SYNTHESIS_MODEL=claude-haiku-4-5-20251001
 ANTHROPIC_ESCALATION_MODEL=claude-opus-4-7
 ANTHROPIC_ENABLE_BATCH=true
 ANTHROPIC_PROMPT_CACHE=true
-
-OLLAMA_BASE_URL=http://localhost:11434
-OLLAMA_MODEL=llama3.1:70b-q4
-USE_LOCAL_LLM=false
 
 BOOKSRUN_API_KEY=
 BOOKSCOUTER_API_KEY=
