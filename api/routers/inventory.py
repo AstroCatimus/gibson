@@ -19,10 +19,16 @@ async def list_inventory(
     store_id: str = Depends(get_store_id),
     status: Optional[str] = None,
     section: Optional[str] = None,
+    condition: Optional[str] = None,
+    no_price: bool = False,
+    sort: str = "newest",
     limit: int = 50,
     offset: int = 0,
 ):
-    """List stock items for a store. Always filtered by store_id."""
+    """
+    List stock items for a store. Always filtered by store_id.
+    sort: newest | title_asc | price_asc | price_desc
+    """
     conditions = ["si.store_id = $1", "si.status != 'WITHDRAWN'"]
     params: list = [store_id]
     idx = 2
@@ -34,9 +40,24 @@ async def list_inventory(
         idx += 1
 
     if section:
-        conditions.append(f"l.section_code = ${idx}")
+        conditions.append(f"l.section = ${idx}")
         params.append(section)
         idx += 1
+
+    if condition:
+        conditions.append(f"si.condition_grade = ${idx}")
+        params.append(condition)
+        idx += 1
+
+    if no_price:
+        conditions.append("si.asking_price IS NULL")
+
+    order = {
+        "newest":     "si.created_at DESC",
+        "title_asc":  "w.title ASC",
+        "price_asc":  "si.asking_price ASC NULLS LAST",
+        "price_desc": "si.asking_price DESC NULLS FIRST",
+    }.get(sort, "si.created_at DESC")
 
     where = " AND ".join(conditions)
     params.extend([limit, offset])
@@ -57,7 +78,7 @@ async def list_inventory(
         LEFT JOIN gibson_agent a ON a.agent_id = wa.agent_id
         LEFT JOIN gibson_location l ON l.location_id = si.location_id
         WHERE {where}
-        ORDER BY si.created_at DESC
+        ORDER BY {order}
         LIMIT ${idx} OFFSET ${idx + 1}
         """,
         *params,

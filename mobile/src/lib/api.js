@@ -27,13 +27,13 @@ async function getHeaders() {
   };
 }
 
-async function request(method, path, body = null) {
+async function request(method, path, body = null, headerOverrides = {}) {
   const url = `${BASE_URL}${path}`;
   logger.debug(`→ ${method} ${path}`, body ?? undefined);
 
   let headers;
   try {
-    headers = await getHeaders();
+    headers = { ...await getHeaders(), ...headerOverrides };
   } catch (e) {
     logger.error('getHeaders failed', e.message);
     throw e;
@@ -99,11 +99,13 @@ export const api = {
     request('POST', '/api/catalogue/stock-item', data),
 
   // ── Inventory ───────────────────────────────────────────────
-  getInventory: (params = '') =>
-    request('GET', `/api/inventory${params}`),
+  getInventory: (params = '', storeId = null) =>
+    request('GET', `/api/inventory${params}`, null,
+      storeId ? { 'X-Store-Id': storeId } : {}),
 
-  getInventoryStats: () =>
-    request('GET', '/api/inventory/count'),
+  getInventoryStats: (storeId = null) =>
+    request('GET', '/api/inventory/count', null,
+      storeId ? { 'X-Store-Id': storeId } : {}),
 
   getItemBySku: (sku) =>
     request('GET', `/api/inventory/sku/${encodeURIComponent(sku)}`),
