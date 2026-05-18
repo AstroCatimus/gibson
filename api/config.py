@@ -28,9 +28,9 @@ class Settings(BaseSettings):
     # Confidence threshold below which vision escalates from Haiku → Sonnet
     vision_escalation_threshold: float = 0.60
 
-    # Local LLM
-    ollama_base_url: str = "http://localhost:11434"
-    ollama_model: str = "llama3:8b"
+    # Local LLM — reserved for future use; not active
+    # ollama_base_url: str = "http://localhost:11434"
+    # ollama_model: str = "llama3:8b"
 
     # Pricing
     booksrun_api_key: str = ""
@@ -66,18 +66,10 @@ class Settings(BaseSettings):
     default_store_id: str = "a1b2c3d4-0001-4000-8000-000000000001"
 
     # Feature flags
-    use_local_llm: bool = False
-    use_local_clip: bool = False
     shelfie_enabled: bool = False
     agent_enabled: bool = False
     whatnot_live_camera: bool = False
     bookfinder_enabled: bool = True
-
-    # Training pipeline — OFF until a local Ollama server is set up.
-    # Do NOT enable on the cloud server. Requires a dedicated local machine
-    # running Ollama + Llama 3 8B with sufficient VRAM for QLoRA fine-tuning.
-    # When ready: set TRAINING_ENABLED=true in .env on that machine only.
-    training_enabled: bool = False
 
     # Server
     api_host: str = "0.0.0.0"

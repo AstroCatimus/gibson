@@ -33,18 +33,16 @@
 
 **Database:** PostgreSQL via Supabase (Year 1). Extensions: pg_trgm, uuid-ossp, pgvector (post-migration).
 
-**AI (Year 1 — Claude API):**
+**AI (Claude API):**
 - Vision + identification: `claude-sonnet-4-6`
 - Triage + dedup: `claude-haiku-4-5` (read from `settings.anthropic_triage_model`)
 - Escalation (hard cases): `claude-opus-4-7`
 - Prompt caching active on all calls. Batch API for async workloads.
 
-**AI (Post-migration):** Ollama + Llama 3.1 70B on local server. Claude as paid escalation fallback.
-
 **Code rules:**
 - Every DB query touching Stock Item includes `store_id` filter.
 - Every API call: retry logic, timeout, graceful degradation.
-- Every correction generates a training pair.
+- Every correction logged as an audit trail.
 - Every conversation logged in full (multi-turn schema).
 
 ---

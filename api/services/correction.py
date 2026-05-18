@@ -1,14 +1,9 @@
 """
 Gibson correction engine.
-The most critical software after the photo pipeline.
-The training loop depends entirely on this.
 
-Every dealer override of Gibson's suggestion is recorded as a correction.
+Every dealer override of Gibson's suggestion is recorded.
 Original value preserved before every correction. Not optional.
-
-TRAINING NOTE: is_training_pair is always False until settings.training_enabled
-is True. The corrections table still fills up — that data isn't lost. When the
-local Ollama server is ready, flip the flag and the pipeline picks up from there.
+Corrections are an audit trail and a signal for future improvement.
 """
 
 from uuid import UUID
@@ -16,7 +11,6 @@ from typing import Optional
 
 from api.database import fetchrow, execute
 from api.services.triage import assign_concern_level
-from api.config import settings
 
 
 async def record_correction(
@@ -31,8 +25,6 @@ async def record_correction(
 ) -> dict:
     """
     Record a correction. Auto-assigns concern level.
-    Every correction is a training signal.
-
     Every disagreement between Gibson's suggestion and dealer's decision is logged.
     """
     # Check for conflicts with source records
@@ -87,32 +79,26 @@ async def record_correction(
         price_deviation_pct=None,
     )
 
-    # is_training_pair is only True when the local training server is ready.
-    # Corrections accumulate regardless — nothing is lost. The flag is
-    # what tells the export script which rows to include in QLoRA datasets.
-    is_training_pair = settings.training_enabled
-
     row = await fetchrow(
         """
         INSERT INTO gibson_correction (stock_item_id, edition_id, field_name,
                                         original_value, corrected_value, corrected_by,
                                         correction_reason, gibson_original_confidence,
-                                        concern_level, is_training_pair)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                                        concern_level)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
         RETURNING correction_id, concern_level
         """,
         str(stock_item_id) if stock_item_id else None,
         str(edition_id) if edition_id else None,
         field_name, original_value, corrected_value,
         str(corrected_by), correction_reason,
-        gibson_original_confidence, concern, is_training_pair,
+        gibson_original_confidence, concern,
     )
 
     return {
-        "correction_id":   row["correction_id"],
-        "concern_level":   row["concern_level"],
+        "correction_id":    row["correction_id"],
+        "concern_level":    row["concern_level"],
         "conflicts_source": conflicts_source,
-        "training_pair":   is_training_pair,
     }
 
 
@@ -121,9 +107,7 @@ async def get_review_queue(
     limit: int = 50,
 ) -> list[dict]:
     """
-    Correction review queue for Eddy.
-    Everything goes to Eddy. Gibson sorts by concern level.
-    One-tap approve/reject. Batch approve all LOW with one button.
+    Correction review queue — sorted by concern level (HIGH first).
     """
     from api.database import fetch
 
@@ -137,7 +121,7 @@ async def get_review_queue(
             LEFT JOIN gibson_work w ON w.work_id = e.work_id
             LEFT JOIN gibson_work_agent wa ON wa.work_id = w.work_id AND wa.role = 'author'
             LEFT JOIN gibson_agent a ON a.agent_id = wa.agent_id
-            WHERE c.reviewed_by IS NULL AND c.concern_level = $1
+            WHERE c.concern_level = $1
             ORDER BY c.created_at
             LIMIT $2
             """,
@@ -153,12 +137,11 @@ async def get_review_queue(
             LEFT JOIN gibson_work w ON w.work_id = e.work_id
             LEFT JOIN gibson_work_agent wa ON wa.work_id = w.work_id AND wa.role = 'author'
             LEFT JOIN gibson_agent a ON a.agent_id = wa.agent_id
-            WHERE c.reviewed_by IS NULL
             ORDER BY
                 CASE c.concern_level
-                    WHEN 'HIGH' THEN 1
+                    WHEN 'HIGH'   THEN 1
                     WHEN 'MEDIUM' THEN 2
-                    WHEN 'LOW' THEN 3
+                    WHEN 'LOW'    THEN 3
                 END,
                 c.created_at
             LIMIT $1
