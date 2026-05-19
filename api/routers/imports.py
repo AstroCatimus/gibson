@@ -141,6 +141,7 @@ def _parse_amazon(row: dict) -> Optional[dict]:
         "isbn":        isbn,
         "title":       (row.get("item-name") or "").strip(),
         "author":      None,   # Amazon title field often has author appended — skip for now
+        "publisher":   (row.get("publisher") or "").strip() or None,
         "price":       _to_float(row.get("price")),
         "condition":   cond,
         "section":     _extract_amazon_section(row.get("item-note") or ""),
@@ -158,6 +159,7 @@ def _parse_kazam(row: dict) -> Optional[dict]:
         "isbn":        isbn,
         "title":       (row.get("title") or "").strip(),
         "author":      (row.get("author") or "").strip() or None,
+        "publisher":   (row.get("publisher") or "").strip() or None,
         "price":       _to_float(row.get("price")),
         "condition":   cond,
         "section":     (row.get("location") or "").strip() or None,
@@ -447,6 +449,64 @@ async def _process(job: dict, content: bytes, parser, trust_tier: int):
                     )
 
         job["pct"] = 40
+
+        # ── 4b. Upsert publishers ─────────────────────────────────────
+        # Runs on parsed_all (includes already-imported rows) so re-uploading
+        # the same file backfills publisher on existing editions.
+        # ON CONFLICT DO NOTHING makes every run idempotent.
+        pub_by_isbn: dict = {}   # isbn_13 → publisher name (first non-null wins)
+        for p in parsed_all:
+            if p.get("publisher") and p.get("isbn_13") and p["isbn_13"] not in pub_by_isbn:
+                pub_by_isbn[p["isbn_13"]] = p["publisher"]
+
+        if pub_by_isbn:
+            # Re-fetch edition_ids for all ISBNs (includes pre-existing editions)
+            pub_ed_rows = await fetch(
+                "SELECT isbn_13, edition_id FROM gibson_edition WHERE isbn_13 = ANY($1)",
+                list(pub_by_isbn.keys()),
+            )
+            pub_edition_map = {r["isbn_13"]: str(r["edition_id"]) for r in pub_ed_rows}
+
+            unique_pub_names = list({v for v in pub_by_isbn.values()})
+
+            # Find existing publisher records by name
+            ex_pubs = await fetch(
+                "SELECT publisher_id, name FROM gibson_publisher WHERE name = ANY($1)",
+                unique_pub_names,
+            )
+            pub_map = {r["name"]: str(r["publisher_id"]) for r in ex_pubs}
+
+            # Create any publishers not yet in the DB
+            new_pub_names = [n for n in unique_pub_names if n not in pub_map]
+            if new_pub_names:
+                new_pubs = await fetch(
+                    "INSERT INTO gibson_publisher (name, name_sort, publisher_type) "
+                    "SELECT * FROM unnest($1::text[], $2::text[], $3::text[]) "
+                    "RETURNING publisher_id, name",
+                    new_pub_names,
+                    [n.lower() for n in new_pub_names],
+                    ["publisher"] * len(new_pub_names),
+                )
+                for r in new_pubs:
+                    pub_map[r["name"]] = str(r["publisher_id"])
+
+            # Link editions → publishers (ON CONFLICT DO NOTHING = safe to re-run)
+            ep_eids = []
+            ep_pids = []
+            for isbn, pub_name in pub_by_isbn.items():
+                eid = pub_edition_map.get(isbn)
+                pid = pub_map.get(pub_name)
+                if eid and pid:
+                    ep_eids.append(eid)
+                    ep_pids.append(pid)
+
+            if ep_eids:
+                await execute(
+                    "INSERT INTO gibson_edition_publisher (edition_id, publisher_id, role) "
+                    "SELECT * FROM unnest($1::uuid[], $2::uuid[], $3::text[]) "
+                    "ON CONFLICT DO NOTHING",
+                    ep_eids, ep_pids, ["publisher"] * len(ep_eids),
+                )
 
         # ── 5. Locations — 2 queries ──────────────────────────────────
         unique_sections = list({p["section"] for p in parsed if p.get("section")})
