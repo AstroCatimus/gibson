@@ -150,7 +150,7 @@ export default function SettingsScreen() {
                         <Text style={s.roleBadgeText}>{store.role}</Text>
                       </View>
                       {store.address ? (
-                        <Text style={s.storeAddr}>{store.address}</Text>
+                        <Text style={s.storeAddr} numberOfLines={1} ellipsizeMode="tail">{store.address}</Text>
                       ) : null}
                     </View>
                   </View>
@@ -706,15 +706,16 @@ const s = StyleSheet.create({
   storePrefixActive:     { backgroundColor: C.accentBg, borderColor: C.accent },
   storePrefixText:       { color: C.text3, fontWeight: '800', fontSize: 12, fontFamily: 'monospace' },
   storePrefixTextActive: { color: C.accent },
-  storeName:             { color: C.text2, fontSize: 14, fontWeight: '600' },
+  storeName:             { color: C.text2, fontSize: 14, fontWeight: '600', flexShrink: 1 },
   storeNameActive:       { color: C.text },
-  storeMetaRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 3 },
+  storeMetaRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 3, overflow: 'hidden' },
   roleBadge: {
     paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4,
     borderWidth: 1, borderColor: C.border, backgroundColor: C.surface,
+    flexShrink: 0,
   },
   roleBadgeText: { color: C.text3, fontSize: 10, fontWeight: '700', textTransform: 'uppercase' },
-  storeAddr:     { color: C.text3, fontSize: 11 },
+  storeAddr:     { color: C.text3, fontSize: 11, flexShrink: 1 },
   storeRight:    { alignItems: 'flex-end', gap: 4 },
   pendingBadge: {
     backgroundColor: C.accent, borderRadius: 10,
