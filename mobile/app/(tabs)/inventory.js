@@ -258,6 +258,9 @@ export default function InventoryScreen() {
           <View style={s.itemMain}>
             <Text style={s.itemTitle} numberOfLines={1}>{item.title || 'Untitled'}</Text>
             <Text style={s.itemAuthor} numberOfLines={1}>{item.author || ''}</Text>
+            {item.publisher ? (
+              <Text style={s.itemPublisher} numberOfLines={1}>{item.publisher}</Text>
+            ) : null}
             <View style={s.itemMeta}>
               {item.gibson_sku ? (
                 <Text style={s.itemSku}>{item.gibson_sku}</Text>
@@ -786,6 +789,7 @@ const s = StyleSheet.create({
   itemMain: { flex: 1, marginRight: 12 },
   itemTitle: { color: C.text, fontSize: 14, fontWeight: '600' },
   itemAuthor: { color: C.text2, fontSize: 12, marginTop: 2 },
+  itemPublisher: { color: C.text3, fontSize: 11, marginTop: 1 },
   itemMeta: { flexDirection: 'row', gap: 6, marginTop: 5, alignItems: 'center', flexWrap: 'wrap' },
   itemSku: { color: C.text3, fontSize: 10, fontFamily: 'monospace' },
   sectionPill: {

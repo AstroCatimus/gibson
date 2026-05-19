@@ -53,10 +53,11 @@ export default function IdentifyScreen() {
   const result   = params.result   ? JSON.parse(params.result) : null;
   const coverUri = params.coverUri || result?.cover_image_url || null;
 
-  const [title, setTitle]   = useState(result?.title || '');
-  const [author, setAuthor] = useState(result?.author || '');
-  const [isbn, setIsbn]     = useState(result?.isbn_13 || '');
-  const [year, setYear]     = useState(String(result?.publication_year || ''));
+  const [title,     setTitle]     = useState(result?.title || '');
+  const [author,    setAuthor]    = useState(result?.author || '');
+  const [publisher, setPublisher] = useState(result?.publisher || '');
+  const [isbn,      setIsbn]      = useState(result?.isbn_13 || '');
+  const [year,      setYear]      = useState(String(result?.publication_year || ''));
   const [loading, setLoading] = useState(false);
 
   if (!result) {
@@ -76,7 +77,7 @@ export default function IdentifyScreen() {
   function handleConfirm() {
     router.push({
       pathname: '/pricing',
-      params: { isbn, title, author, year, editionId: result.edition_id || '' },
+      params: { isbn, title, author, publisher, year, editionId: result.edition_id || '' },
     });
   }
 
@@ -128,6 +129,15 @@ export default function IdentifyScreen() {
           onChangeText={setAuthor}
           placeholderTextColor="#444"
           placeholder="Author name"
+        />
+
+        <Text style={s.fieldLabel}>Publisher</Text>
+        <TextInput
+          style={s.input}
+          value={publisher}
+          onChangeText={setPublisher}
+          placeholderTextColor="#444"
+          placeholder="Publisher"
         />
 
         <View style={s.fieldRow}>

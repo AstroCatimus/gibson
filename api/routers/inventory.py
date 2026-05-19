@@ -70,12 +70,15 @@ async def list_inventory(
                e.edition_id, e.isbn_13, e.publication_year, e.format,
                w.title, w.subtitle, w.work_type,
                a.name_display as author,
+               pub.name as publisher,
                l.section, l.section_code, l.floor
         FROM gibson_stock_item si
         JOIN gibson_edition e ON e.edition_id = si.edition_id
         JOIN gibson_work w ON w.work_id = e.work_id
         LEFT JOIN gibson_work_agent wa ON wa.work_id = w.work_id AND wa.role = 'author'
         LEFT JOIN gibson_agent a ON a.agent_id = wa.agent_id
+        LEFT JOIN gibson_edition_publisher ep ON ep.edition_id = e.edition_id AND ep.role = 'publisher'
+        LEFT JOIN gibson_publisher pub ON pub.publisher_id = ep.publisher_id
         LEFT JOIN gibson_location l ON l.location_id = si.location_id
         WHERE {where}
         ORDER BY {order}

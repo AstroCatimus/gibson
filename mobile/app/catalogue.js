@@ -20,8 +20,9 @@ const GREEN = '#2ecc71';
 export default function CatalogueScreen() {
   const params = useLocalSearchParams();
 
-  const [title, setTitle]       = useState(params.title     || '');
-  const [author, setAuthor]     = useState(params.author    || '');
+  const [title,     setTitle]     = useState(params.title     || '');
+  const [author,    setAuthor]    = useState(params.author    || '');
+  const [publisher]               = useState(params.publisher || '');
   const [price, setPrice]       = useState(params.price     || '');
   const [condition]             = useState(params.condition || 'Good');
   const [section, setSection]     = useState('');
@@ -145,6 +146,13 @@ export default function CatalogueScreen() {
           placeholder="Author name"
           placeholderTextColor="#444"
         />
+
+        {publisher ? (
+          <>
+            <Text style={s.fieldLabel}>Publisher</Text>
+            <Text style={s.publisherText}>{publisher}</Text>
+          </>
+        ) : null}
 
         <Text style={s.fieldLabel}>Price</Text>
         <View style={s.priceRow}>
@@ -302,6 +310,7 @@ const s = StyleSheet.create({
   },
 
   fieldLabel: { color: '#555', fontSize: 12, marginTop: 12, marginBottom: 4 },
+  publisherText: { color: '#888', fontSize: 14, paddingVertical: 4 },
   input: {
     backgroundColor: '#1a1a2a',
     borderWidth: 1, borderColor: '#252535',
