@@ -81,6 +81,7 @@ export default function InventoryScreen() {
   const [eCondition,  setECondition] = useState('');
   const [eSection,    setESection]  = useState('');
   const [eStatus,     setEStatus]   = useState('');
+  const [eNotes,      setENotes]    = useState('');
   const [eSigned,     setESigned]   = useState(false);
   const [eInscribed,  setEInscribed] = useState(false);
 
@@ -193,6 +194,7 @@ export default function InventoryScreen() {
     setECondition(item.condition_grade || '');
     setESection(item.section || '');
     setEStatus(item.status || 'AVAILABLE');
+    setENotes(item.condition_notes || '');
     setESigned(item.is_signed || false);
     setEInscribed(item.is_inscribed || false);
     setSectionSearch('');
@@ -205,6 +207,7 @@ export default function InventoryScreen() {
       await api.updateItem(editing.stock_item_id, {
         asking_price:    ePrice ? parseFloat(ePrice) : null,
         condition_grade: eCondition || null,
+        condition_notes: eNotes || null,
         status:          eStatus,
         location_id:     loc ? String(loc.location_id) : null,
         is_signed:       eSigned,
@@ -213,8 +216,9 @@ export default function InventoryScreen() {
       setItems(prev => prev.map(i =>
         i.stock_item_id === editing.stock_item_id
           ? { ...i, asking_price: ePrice ? parseFloat(ePrice) : null,
-              condition_grade: eCondition, status: eStatus,
-              section: eSection, is_signed: eSigned, is_inscribed: eInscribed }
+              condition_grade: eCondition, condition_notes: eNotes || null,
+              status: eStatus, section: eSection,
+              is_signed: eSigned, is_inscribed: eInscribed }
           : i
       ));
       setEditing(null);
@@ -260,6 +264,9 @@ export default function InventoryScreen() {
             <Text style={s.itemAuthor} numberOfLines={1}>{item.author || ''}</Text>
             {item.publisher ? (
               <Text style={s.itemPublisher} numberOfLines={1}>{item.publisher}</Text>
+            ) : null}
+            {item.condition_notes ? (
+              <Text style={s.itemNotes} numberOfLines={2}>{item.condition_notes}</Text>
             ) : null}
             <View style={s.itemMeta}>
               {item.gibson_sku ? (
@@ -662,6 +669,17 @@ export default function InventoryScreen() {
                 </View>
               )}
 
+              {/* Condition notes */}
+              <Text style={s.fieldLabel}>Condition Notes</Text>
+              <TextInput
+                style={[s.input, { minHeight: 80, textAlignVertical: 'top' }]}
+                value={eNotes}
+                onChangeText={setENotes}
+                placeholder="Dealer notes on this copy's condition…"
+                placeholderTextColor={C.text3}
+                multiline
+              />
+
               {/* Toggles */}
               <View style={s.toggleRow}>
                 <View>
@@ -790,6 +808,7 @@ const s = StyleSheet.create({
   itemTitle: { color: C.text, fontSize: 14, fontWeight: '600' },
   itemAuthor: { color: C.text2, fontSize: 12, marginTop: 2 },
   itemPublisher: { color: C.text3, fontSize: 11, marginTop: 1 },
+  itemNotes: { color: C.text3, fontSize: 11, marginTop: 2, fontStyle: 'italic' },
   itemMeta: { flexDirection: 'row', gap: 6, marginTop: 5, alignItems: 'center', flexWrap: 'wrap' },
   itemSku: { color: C.text3, fontSize: 10, fontFamily: 'monospace' },
   sectionPill: {

@@ -65,7 +65,7 @@ async def list_inventory(
     rows = await fetch(
         f"""
         SELECT si.stock_item_id, si.gibson_sku, si.status, si.condition_grade,
-               si.asking_price, si.images, si.is_signed, si.is_inscribed,
+               si.asking_price, si.condition_notes, si.images, si.is_signed, si.is_inscribed,
                si.created_at, si.whatnot_showed,
                e.edition_id, e.isbn_13, e.publication_year, e.format,
                w.title, w.subtitle, w.work_type,
