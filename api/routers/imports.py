@@ -393,7 +393,7 @@ async def _process(job: dict, content: bytes, parser, trust_tier: int):
             await execute(
                 """
                 UPDATE gibson_stock_item si
-                SET condition_notes = v.note
+                SET condition_notes = matched.note
                 FROM (
                     SELECT sr.stock_item_id, v.note
                     FROM unnest($1::text[], $2::text[]) AS v(external_id, note)
