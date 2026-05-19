@@ -123,6 +123,7 @@ class MobileConfirmRequest(BaseModel):
     """Flat confirm payload sent by the mobile app after the catalogue flow."""
     title: Optional[str] = None
     author: Optional[str] = None
+    publisher: Optional[str] = None
     isbn_13: Optional[str] = None
     publication_year: Optional[int] = None
     edition_id: Optional[str] = None   # pre-existing edition UUID if known

@@ -365,6 +365,29 @@ async def confirm_identification(
         )
         edition_id = str(edition_row["edition_id"])
 
+    # ── 2b. Upsert publisher ────────────────────────────────────
+    if request.publisher and edition_id:
+        pub_row = await fetchrow(
+            "SELECT publisher_id FROM gibson_publisher WHERE name = $1",
+            request.publisher,
+        )
+        if not pub_row:
+            pub_row = await fetchrow(
+                """
+                INSERT INTO gibson_publisher (name, name_sort, publisher_type)
+                VALUES ($1, $2, 'publisher') RETURNING publisher_id
+                """,
+                request.publisher, request.publisher.lower(),
+            )
+        if pub_row:
+            await execute(
+                """
+                INSERT INTO gibson_edition_publisher (edition_id, publisher_id, role)
+                VALUES ($1, $2, 'publisher') ON CONFLICT DO NOTHING
+                """,
+                edition_id, str(pub_row["publisher_id"]),
+            )
+
     # ── 3. Generate SKU ─────────────────────────────────────────
     sku = None
     if employee_id:

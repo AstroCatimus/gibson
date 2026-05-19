@@ -78,14 +78,15 @@ export default function CatalogueScreen() {
       await api.confirmIdentification({
         title,
         author,
-        isbn_13: params.isbn || null,
+        publisher:        publisher || null,
+        isbn_13:          params.isbn || null,
         publication_year: params.year ? parseInt(params.year) : null,
-        edition_id: params.editionId || null,
-        asking_price: parseFloat(price),
-        condition_grade: condition,
+        edition_id:       params.editionId || null,
+        asking_price:     parseFloat(price),
+        condition_grade:  condition,
         section,
-        is_signed: signed,
-        is_inscribed: inscribed,
+        is_signed:        signed,
+        is_inscribed:     inscribed,
       });
       setDone(true);
     } catch (e) {
