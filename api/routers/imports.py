@@ -109,7 +109,7 @@ KAZAM_CONDITION = {
 }
 
 
-# ── Amazon section extraction ────────────────────────────────────
+# ── Amazon section + note extraction ────────────────────────────
 def _extract_amazon_section(note: str) -> Optional[str]:
     """
     Amazon descriptions end with a shelf tag, e.g.:
@@ -129,6 +129,21 @@ def _extract_amazon_section(note: str) -> Optional[str]:
     return None
 
 
+def _amazon_condition_note(note: str) -> Optional[str]:
+    """
+    Return the Amazon item-note with the trailing shelf tag stripped.
+      'Light wear. Clean pages. Poetry/G' → 'Light wear. Clean pages.'
+    If no tag is found, return the note as-is.
+    """
+    if not note or not note.strip():
+        return None
+    stripped = note.rstrip(". ")
+    parts = stripped.rsplit(" ", 1)
+    if len(parts) == 2 and re.match(r"^(.+)[/\-]([A-Z][a-z]{0,2})$", parts[1]):
+        return parts[0].strip() or None
+    return note.strip() or None
+
+
 # ── Row parsers ──────────────────────────────────────────────────
 def _parse_amazon(row: dict) -> Optional[dict]:
     isbn = (row.get("product-id") or "").strip()
@@ -137,17 +152,19 @@ def _parse_amazon(row: dict) -> Optional[dict]:
     if (row.get("status") or "").strip() == "Incomplete":
         return None
     cond = AMAZON_CONDITION.get(str(row.get("item-condition") or "").strip(), "Good")
+    note = (row.get("item-note") or "").strip()
     return {
-        "isbn":        isbn,
-        "title":       (row.get("item-name") or "").strip(),
-        "author":      None,   # Amazon title field often has author appended — skip for now
-        "publisher":   (row.get("publisher") or "").strip() or None,
-        "price":       _to_float(row.get("price")),
-        "condition":   cond,
-        "section":     _extract_amazon_section(row.get("item-note") or ""),
-        "external_id": (row.get("listing-id") or row.get("seller-sku") or "").strip(),
-        "asin":        (row.get("asin1") or "").strip(),
-        "source":      "amazon",
+        "isbn":            isbn,
+        "title":           (row.get("item-name") or "").strip(),
+        "author":          None,   # Amazon title field often has author appended — skip for now
+        "publisher":       (row.get("publisher") or "").strip() or None,
+        "condition_notes": _amazon_condition_note(note),
+        "price":           _to_float(row.get("price")),
+        "condition":       cond,
+        "section":         _extract_amazon_section(note),
+        "external_id":     (row.get("listing-id") or row.get("seller-sku") or "").strip(),
+        "asin":            (row.get("asin1") or "").strip(),
+        "source":          "amazon",
     }
 
 def _parse_kazam(row: dict) -> Optional[dict]:
@@ -156,16 +173,17 @@ def _parse_kazam(row: dict) -> Optional[dict]:
         return None
     cond = KAZAM_CONDITION.get((row.get("condition") or "").strip().lower(), "Good")
     return {
-        "isbn":        isbn,
-        "title":       (row.get("title") or "").strip(),
-        "author":      (row.get("author") or "").strip() or None,
-        "publisher":   (row.get("publisher") or "").strip() or None,
-        "price":       _to_float(row.get("price")),
-        "condition":   cond,
-        "section":     (row.get("location") or "").strip() or None,
-        "external_id": (row.get("id") or "").strip(),
-        "asin":        None,
-        "source":      "kazam",
+        "isbn":            isbn,
+        "title":           (row.get("title") or "").strip(),
+        "author":          (row.get("author") or "").strip() or None,
+        "publisher":       (row.get("publisher") or "").strip() or None,
+        "condition_notes": (row.get("description") or "").strip() or None,
+        "price":           _to_float(row.get("price")),
+        "condition":       cond,
+        "section":         (row.get("location") or "").strip() or None,
+        "external_id":     (row.get("id") or "").strip(),
+        "asin":            None,
+        "source":          "kazam",
     }
 
 def _to_float(val) -> Optional[float]:
@@ -362,6 +380,32 @@ async def _process(job: dict, content: bytes, parser, trust_tier: int):
         job["skipped"] = len(parsed_all) - len(parsed)
         job["pct"] = 10
 
+        # ── 2b. Backfill condition_notes on already-imported stock items ──
+        # For rows we're skipping (already in DB), update condition_notes
+        # where it's currently NULL so a re-upload fills it in.
+        already_with_notes = [
+            p for p in parsed_all
+            if p.get("external_id") in already_done and p.get("condition_notes")
+        ]
+        if already_with_notes:
+            bf_ext_ids = [p["external_id"] for p in already_with_notes]
+            bf_notes   = [p["condition_notes"] for p in already_with_notes]
+            await execute(
+                """
+                UPDATE gibson_stock_item si
+                SET condition_notes = v.note
+                FROM (
+                    SELECT sr.stock_item_id, v.note
+                    FROM unnest($1::text[], $2::text[]) AS v(external_id, note)
+                    JOIN gibson_source_record sr
+                      ON sr.external_id = v.external_id AND sr.source = $3
+                ) matched
+                WHERE si.stock_item_id = matched.stock_item_id
+                  AND si.condition_notes IS NULL
+                """,
+                bf_ext_ids, bf_notes, source,
+            )
+
         if not parsed:
             job.update(status="done", done=True, pct=100, processed=job["total"])
             return
@@ -545,7 +589,7 @@ async def _process(job: dict, content: bytes, parser, trust_tier: int):
         # ── 7. Bulk insert stock items — one query ────────────────────
         ed_ids, sku_l, sid_l, cond_l, mode_l = [], [], [], [], []
         price_l, loc_l, tier_l, vstat_l      = [], [], [], []
-        azid_l, asin_l                        = [], []
+        azid_l, asin_l, cnotes_l             = [], [], []
         valid: list = []
 
         for p, sku in zip(parsed, skus):
@@ -560,6 +604,7 @@ async def _process(job: dict, content: bytes, parser, trust_tier: int):
             tier_l.append(trust_tier); vstat_l.append("UNVERIFIED")
             azid_l.append(p.get("external_id") if p["source"] == "amazon" else None)
             asin_l.append(p.get("asin") or None)
+            cnotes_l.append(p.get("condition_notes") or None)
             valid.append(p)
 
         # ── 7+8. Chunked stock items + source records ─────────────────
@@ -577,14 +622,16 @@ async def _process(job: dict, content: bytes, parser, trust_tier: int):
                     condition_grade, condition_mode,
                     asking_price, location_id,
                     trust_tier, shelf_verification_status,
-                    amazon_listing_id, amazon_asin
+                    amazon_listing_id, amazon_asin,
+                    condition_notes
                 )
                 SELECT * FROM unnest(
                     $1::uuid[],  $2::text[],  $3::uuid[],
                     $4::text[],  $5::text[],
                     $6::float8[], $7::uuid[],
                     $8::int[],   $9::text[],
-                    $10::text[], $11::text[]
+                    $10::text[], $11::text[],
+                    $12::text[]
                 )
                 RETURNING stock_item_id
                 """,
@@ -593,6 +640,7 @@ async def _process(job: dict, content: bytes, parser, trust_tier: int):
                 price_l[sl], loc_l[sl],
                 tier_l[sl], vstat_l[sl],
                 azid_l[sl], asin_l[sl],
+                cnotes_l[sl],
             )
             item_rows.extend(chunk_items)
             job["pct"] = 60 + round(20 * (start + len(chunk_items)) / max(len(ed_ids), 1))
