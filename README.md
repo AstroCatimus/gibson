@@ -105,7 +105,7 @@ git add -A && git commit -m "what you changed" && git push
 **Not started:**
 - Shelf scanner (scan a whole shelf at once)
 - Whatnot show mode
-- Listing to Biblio / Amazon
+- Listing to Biblio / Amazon / Ebay
 - Store membership gate (get_store_id currently trusts any header)
 
 ---
