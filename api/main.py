@@ -81,6 +81,7 @@ from api.routers import (
     stores,
     defrag,
     imports,
+    listings,
 )
 
 
@@ -88,11 +89,13 @@ from api.routers import (
 async def lifespan(app: FastAPI):
     """Startup and shutdown events."""
     await init_pool()
-    # Start import queue worker — picks up Supabase-Storage-based imports
     from api.routers.imports import queue_worker
-    worker_task = asyncio.create_task(queue_worker())
+    from api.workers.order_sync import order_sync_worker
+    import_task = asyncio.create_task(queue_worker())
+    sync_task   = asyncio.create_task(order_sync_worker())
     yield
-    worker_task.cancel()
+    import_task.cancel()
+    sync_task.cancel()
     await close_pool()
 
 
@@ -129,6 +132,7 @@ app.include_router(conversation.router, prefix="/api/conversation", tags=["conve
 app.include_router(stores.router,       prefix="/api/stores",       tags=["stores"])
 app.include_router(defrag.router,       prefix="/api/defrag",       tags=["defrag"])
 app.include_router(imports.router,      prefix="/api/import",       tags=["import"])
+app.include_router(listings.router,     prefix="/api/listings",     tags=["listings"])
 
 # ─── PWA Static Files ────────────────────────────────────────
 

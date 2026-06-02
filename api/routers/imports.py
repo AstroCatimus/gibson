@@ -515,24 +515,24 @@ async def _process(job: dict, content: bytes, parser, trust_tier: int):
 
             # Find existing publisher records by name
             ex_pubs = await fetch(
-                "SELECT publisher_id, name FROM gibson_publisher WHERE name = ANY($1)",
+                "SELECT publisher_id, name_display FROM gibson_publisher WHERE name_display = ANY($1)",
                 unique_pub_names,
             )
-            pub_map = {r["name"]: str(r["publisher_id"]) for r in ex_pubs}
+            pub_map = {r["name_display"]: str(r["publisher_id"]) for r in ex_pubs}
 
             # Create any publishers not yet in the DB
             new_pub_names = [n for n in unique_pub_names if n not in pub_map]
             if new_pub_names:
                 new_pubs = await fetch(
-                    "INSERT INTO gibson_publisher (name, name_sort, publisher_type) "
+                    "INSERT INTO gibson_publisher (name_display, name_sort, publisher_type) "
                     "SELECT * FROM unnest($1::text[], $2::text[], $3::text[]) "
-                    "RETURNING publisher_id, name",
+                    "RETURNING publisher_id, name_display",
                     new_pub_names,
                     [n.lower() for n in new_pub_names],
-                    ["publisher"] * len(new_pub_names),
+                    ["commercial"] * len(new_pub_names),
                 )
                 for r in new_pubs:
-                    pub_map[r["name"]] = str(r["publisher_id"])
+                    pub_map[r["name_display"]] = str(r["publisher_id"])
 
             # Link editions → publishers (ON CONFLICT DO NOTHING = safe to re-run)
             ep_eids = []

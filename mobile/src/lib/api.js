@@ -116,6 +116,12 @@ export const api = {
   deleteItem: (id) =>
     request('DELETE', `/api/inventory/${id}`),
 
+  addItemImage: (id, imageBase64, contentType = 'image/jpeg') =>
+    request('POST', `/api/inventory/${id}/images`, { image_base64: imageBase64, content_type: contentType }),
+
+  removeItemImage: (id, url) =>
+    request('DELETE', `/api/inventory/${id}/images`, { url }),
+
   // ── POS ─────────────────────────────────────────────────────
   createSale: (items, paymentMethod) =>
     request('POST', '/api/pos/sale', { items, payment_method: paymentMethod }),

@@ -5,11 +5,14 @@ Cost basis NEVER exposed outside owning store.
 """
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import FileResponse
 from uuid import UUID
 from typing import Optional
+import os
 
 from api.dependencies import get_store_id
 from api.database import fetch, fetchrow, execute
+from api.config import settings  # used for local image serving fallback
 
 router = APIRouter()
 
@@ -69,16 +72,20 @@ async def list_inventory(
                si.created_at, si.whatnot_showed,
                e.edition_id, e.isbn_13, e.publication_year, e.format,
                w.title, w.subtitle, w.work_type,
-               a.name_display as author,
-               pub.name as publisher,
+               (SELECT a.name_display
+                FROM gibson_work_agent wa
+                JOIN gibson_agent a ON a.agent_id = wa.agent_id
+                WHERE wa.work_id = w.work_id AND wa.role = 'author'
+                ORDER BY wa.role_order LIMIT 1) AS author,
+               (SELECT pub.name_display
+                FROM gibson_edition_publisher ep
+                JOIN gibson_publisher pub ON pub.publisher_id = ep.publisher_id
+                WHERE ep.edition_id = e.edition_id AND ep.role = 'publisher'
+                LIMIT 1) AS publisher,
                l.section, l.section_code, l.floor
         FROM gibson_stock_item si
         JOIN gibson_edition e ON e.edition_id = si.edition_id
         JOIN gibson_work w ON w.work_id = e.work_id
-        LEFT JOIN gibson_work_agent wa ON wa.work_id = w.work_id AND wa.role = 'author'
-        LEFT JOIN gibson_agent a ON a.agent_id = wa.agent_id
-        LEFT JOIN gibson_edition_publisher ep ON ep.edition_id = e.edition_id AND ep.role = 'publisher'
-        LEFT JOIN gibson_publisher pub ON pub.publisher_id = ep.publisher_id
         LEFT JOIN gibson_location l ON l.location_id = si.location_id
         WHERE {where}
         ORDER BY {order}
@@ -127,13 +134,15 @@ async def get_stock_item(
         """
         SELECT si.*, e.isbn_13, e.isbn_10, e.publication_year, e.format,
                w.title, w.subtitle, w.work_type,
-               a.name_display as author,
+               (SELECT a.name_display
+                FROM gibson_work_agent wa
+                JOIN gibson_agent a ON a.agent_id = wa.agent_id
+                WHERE wa.work_id = w.work_id AND wa.role = 'author'
+                ORDER BY wa.role_order LIMIT 1) AS author,
                l.section, l.section_code, l.floor
         FROM gibson_stock_item si
         JOIN gibson_edition e ON e.edition_id = si.edition_id
         JOIN gibson_work w ON w.work_id = e.work_id
-        LEFT JOIN gibson_work_agent wa ON wa.work_id = w.work_id AND wa.role = 'author'
-        LEFT JOIN gibson_agent a ON a.agent_id = wa.agent_id
         LEFT JOIN gibson_location l ON l.location_id = si.location_id
         WHERE si.stock_item_id = $1 AND si.store_id = $2
         """,
@@ -214,3 +223,79 @@ async def lookup_by_sku(
     if not row:
         raise HTTPException(status_code=404, detail="SKU not found")
     return dict(row)
+
+
+@router.post("/{stock_item_id}/images")
+async def add_image(
+    stock_item_id: UUID,
+    payload: dict,
+    store_id: str = Depends(get_store_id),
+):
+    """
+    Upload a photo for a stock item.
+    Body: { "image_base64": "...", "content_type": "image/jpeg" }
+    Returns { "url": "...", "images": [...all urls] }
+    """
+    from api.services.images import upload_stock_image
+
+    row = await fetchrow(
+        "SELECT images FROM gibson_stock_item WHERE stock_item_id = $1 AND store_id = $2",
+        str(stock_item_id), store_id,
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="Stock item not found")
+
+    image_base64 = payload.get("image_base64", "")
+    content_type = payload.get("content_type", "image/jpeg")
+    if not image_base64:
+        raise HTTPException(status_code=400, detail="image_base64 required")
+
+    url = await upload_stock_image(image_base64, content_type)
+
+    existing = list(row["images"] or [])
+    existing.append(url)
+
+    await execute(
+        "UPDATE gibson_stock_item SET images = $1, updated_at = now() WHERE stock_item_id = $2",
+        existing, str(stock_item_id),
+    )
+    return {"url": url, "images": existing}
+
+
+@router.delete("/{stock_item_id}/images")
+async def remove_image(
+    stock_item_id: UUID,
+    payload: dict,
+    store_id: str = Depends(get_store_id),
+):
+    """
+    Remove a photo from a stock item.
+    Body: { "url": "https://..." }
+    """
+    from api.services.images import delete_stock_image
+
+    row = await fetchrow(
+        "SELECT images FROM gibson_stock_item WHERE stock_item_id = $1 AND store_id = $2",
+        str(stock_item_id), store_id,
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="Stock item not found")
+
+    url = payload.get("url", "")
+    updated = [u for u in (row["images"] or []) if u != url]
+
+    await execute(
+        "UPDATE gibson_stock_item SET images = $1, updated_at = now() WHERE stock_item_id = $2",
+        updated, str(stock_item_id),
+    )
+    await delete_stock_image(url)
+    return {"images": updated}
+
+
+@router.get("/images/stock/{filename}")
+async def serve_local_image(filename: str):
+    """Serve locally stored images (development only — use R2 in production)."""
+    path = os.path.join(settings.local_image_path, "stock", filename)
+    if not os.path.exists(path):
+        raise HTTPException(status_code=404, detail="Image not found")
+    return FileResponse(path)

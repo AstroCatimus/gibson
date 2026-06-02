@@ -41,12 +41,17 @@ class Settings(BaseSettings):
     biblio_api_key: str = ""
     whatnot_api_key: str = ""
 
-    # Image storage (Cloudflare R2)
-    r2_account_id: str = ""
-    r2_access_key_id: str = ""
-    r2_secret_access_key: str = ""
-    r2_bucket_name: str = "gibson-images"
-    r2_public_url: str = ""
+    # eBay Sell APIs (ebay_app_id = client_id, ebay_cert_id = client_secret)
+    ebay_ru_name: str = ""            # RuName registered in eBay developer console
+    ebay_environment: str = "production"  # 'production' or 'sandbox'
+
+    # Amazon SP-API — Login with Amazon (LWA) OAuth credentials
+    # Separate from the eBay creds; registered in SP-API developer console
+    amazon_lwa_client_id: str = ""
+    amazon_lwa_client_secret: str = ""
+    amazon_marketplace_id: str = "ATVPDKIKX0DER"  # US marketplace
+
+    # Image storage (Supabase Storage — bucket: gibson-images)
     local_image_path: str = "/data/images"
 
     # Notifications

@@ -415,11 +415,14 @@ async def list_sections(
 
     rows = await fetch(
         """
-        SELECT location_id, section, section_code, floor,
-               (SELECT COUNT(*) FROM gibson_stock_item si WHERE si.location_id = gl.location_id) AS item_count
+        SELECT gl.location_id, gl.section, gl.section_code, gl.floor,
+               COUNT(si.stock_item_id) AS item_count
         FROM gibson_location gl
-        WHERE store_id = $1
-        ORDER BY section ASC
+        LEFT JOIN gibson_stock_item si
+               ON si.location_id = gl.location_id
+        WHERE gl.store_id = $1
+        GROUP BY gl.location_id, gl.section, gl.section_code, gl.floor
+        ORDER BY gl.section ASC
         """,
         x_store_id,
     )

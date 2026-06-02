@@ -368,14 +368,14 @@ async def confirm_identification(
     # ── 2b. Upsert publisher ────────────────────────────────────
     if request.publisher and edition_id:
         pub_row = await fetchrow(
-            "SELECT publisher_id FROM gibson_publisher WHERE name = $1",
+            "SELECT publisher_id FROM gibson_publisher WHERE name_display = $1",
             request.publisher,
         )
         if not pub_row:
             pub_row = await fetchrow(
                 """
-                INSERT INTO gibson_publisher (name, name_sort, publisher_type)
-                VALUES ($1, $2, 'publisher') RETURNING publisher_id
+                INSERT INTO gibson_publisher (name_display, name_sort, publisher_type)
+                VALUES ($1, $2, 'commercial') RETURNING publisher_id
                 """,
                 request.publisher, request.publisher.lower(),
             )

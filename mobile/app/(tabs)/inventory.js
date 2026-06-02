@@ -9,9 +9,10 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View, Text, StyleSheet, FlatList, TextInput,
   TouchableOpacity, ActivityIndicator, Modal, ScrollView,
-  Switch, Alert,
+  Switch, Alert, Image,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import * as ImagePicker from 'expo-image-picker';
 import { api } from '../../src/lib/api';
 import { C, COND_COLOR } from '../../src/lib/theme';
 
@@ -68,6 +69,12 @@ export default function InventoryScreen() {
   const [sortKey,         setSortKey]         = useState('newest');
   const sortIdx = useRef(0);
 
+  // Ref mirrors filter state so loadMore never reads a stale closure.
+  // Must be updated synchronously in applyFilter BEFORE loadAll is called.
+  const filtersRef = useRef({
+    condition: '', status: '', section: '', noPrice: false, sort: 'newest',
+  });
+
   // ── Section picker ──────────────────────────────────────────────
   const [sections, setSections] = useState([]);
   const [sectionPickerOpen, setSectionPickerOpen] = useState(false);
@@ -84,17 +91,29 @@ export default function InventoryScreen() {
   const [eNotes,      setENotes]    = useState('');
   const [eSigned,     setESigned]   = useState(false);
   const [eInscribed,  setEInscribed] = useState(false);
+  const [ePhotos,     setEPhotos]   = useState([]);
+  const [uploadingPhoto, setUploadingPhoto] = useState(false);
 
   // ── Derived filter query string ─────────────────────────────────
-  function buildParams(extra = {}) {
+  // Always reads from filtersRef so loadMore never uses a stale closure.
+  // `overrides` fully replace individual keys when provided (including ''/false).
+  function buildParams(overrides = {}) {
+    const f = filtersRef.current;
+    const condition = 'condition' in overrides ? overrides.condition : f.condition;
+    const status    = 'status'    in overrides ? overrides.status    : f.status;
+    const section   = 'section'   in overrides ? overrides.section   : f.section;
+    const noPrice   = 'noPrice'   in overrides ? overrides.noPrice   : f.noPrice;
+    const sort      = 'sort'      in overrides ? overrides.sort      : f.sort;
+    const offsetVal = 'offset'    in overrides ? overrides.offset    : 0;
+
     const p = new URLSearchParams();
-    p.set('limit', String(PAGE));
-    p.set('offset', String(extra.offset ?? 0));
-    p.set('sort', extra.sort ?? sortKey);
-    if (extra.condition ?? filterCondition) p.set('condition', extra.condition ?? filterCondition);
-    if (extra.status    ?? filterStatus)    p.set('status',    extra.status    ?? filterStatus);
-    if (extra.section   ?? filterSection)   p.set('section',   extra.section   ?? filterSection);
-    if (extra.noPrice   ?? filterNoPrice)   p.set('no_price',  'true');
+    p.set('limit',  String(PAGE));
+    p.set('offset', String(offsetVal));
+    p.set('sort',   sort);
+    if (condition) p.set('condition', condition);
+    if (status)    p.set('status',    status);
+    if (section)   p.set('section',   section);
+    if (noPrice)   p.set('no_price',  'true');
     return '?' + p.toString();
   }
 
@@ -111,14 +130,14 @@ export default function InventoryScreen() {
     } catch (e) { console.warn('loadStores', e); }
   }
 
-  async function loadAll(overrides = {}) {
+  async function loadAll(storeIdOverride) {
     setLoading(true);
     setOffset(0);
     setHasMore(true);
-    const storeId = overrides.storeId ?? selectedStoreId;
+    const storeId = storeIdOverride ?? selectedStoreId;
     try {
       const [inv, st, sec] = await Promise.all([
-        api.getInventory(buildParams({ ...overrides, offset: 0 }), storeId),
+        api.getInventory(buildParams({ offset: 0 }), storeId),
         api.getInventoryStats(storeId),
         api.getSections(),
       ]);
@@ -136,6 +155,7 @@ export default function InventoryScreen() {
     if (loadingMore || !hasMore || query) return;
     setLoadingMore(true);
     try {
+      // buildParams reads filtersRef.current — always current, never stale.
       const inv  = await api.getInventory(buildParams({ offset }), selectedStoreId);
       const list = inv.items || inv || [];
       setItems(prev => [...prev, ...list]);
@@ -147,38 +167,33 @@ export default function InventoryScreen() {
 
   // ── Filter / sort helpers ───────────────────────────────────────
   function applyFilter(patch) {
-    const next = {
-      condition: filterCondition,
-      status:    filterStatus,
-      section:   filterSection,
-      noPrice:   filterNoPrice,
-      sort:      sortKey,
-      ...patch,
-    };
+    // Update ref FIRST so buildParams immediately sees the new values,
+    // even before React re-renders with the new state.
+    filtersRef.current = { ...filtersRef.current, ...patch };
+
     if (patch.condition !== undefined) setFilterCondition(patch.condition);
     if (patch.status    !== undefined) setFilterStatus(patch.status);
     if (patch.section   !== undefined) setFilterSection(patch.section);
     if (patch.noPrice   !== undefined) setFilterNoPrice(patch.noPrice);
     if (patch.sort      !== undefined) setSortKey(patch.sort);
     setQuery('');
-    loadAll(next);
+    loadAll();
   }
 
   function cycleSort() {
     sortIdx.current = (sortIdx.current + 1) % SORT_OPTIONS.length;
-    const next = SORT_OPTIONS[sortIdx.current].key;
-    applyFilter({ sort: next });
+    applyFilter({ sort: SORT_OPTIONS[sortIdx.current].key });
   }
 
   function selectStore(id) {
     setSelectedStoreId(id);
-    loadAll({ storeId: id });
+    loadAll(id);
   }
 
   // ── Search ──────────────────────────────────────────────────────
   async function handleSearch(text) {
     setQuery(text);
-    if (!text.trim()) { loadAll(); return; }
+    if (!text.trim()) { loadAll(selectedStoreId); return; }
     setSearching(true);
     try {
       const results = await api.searchCatalogue(text);
@@ -197,7 +212,78 @@ export default function InventoryScreen() {
     setENotes(item.condition_notes || '');
     setESigned(item.is_signed || false);
     setEInscribed(item.is_inscribed || false);
+    setEPhotos(item.images || []);
     setSectionSearch('');
+  }
+
+  async function handleAddPhoto() {
+    Alert.alert('Add Photo', 'Choose a source', [
+      {
+        text: 'Camera',
+        onPress: async () => {
+          const perm = await ImagePicker.requestCameraPermissionsAsync();
+          if (!perm.granted) { Alert.alert('Permission needed', 'Camera access is required.'); return; }
+          const result = await ImagePicker.launchCameraAsync({
+            mediaTypes: ImagePicker.MediaTypeOptions.Images,
+            quality: 0.7,
+            base64: true,
+            allowsEditing: false,
+          });
+          if (!result.canceled) _uploadPhoto(result.assets[0]);
+        },
+      },
+      {
+        text: 'Photo Library',
+        onPress: async () => {
+          const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+          if (!perm.granted) { Alert.alert('Permission needed', 'Photo library access is required.'); return; }
+          const result = await ImagePicker.launchImageLibraryAsync({
+            mediaTypes: ImagePicker.MediaTypeOptions.Images,
+            quality: 0.7,
+            base64: true,
+            allowsEditing: false,
+          });
+          if (!result.canceled) _uploadPhoto(result.assets[0]);
+        },
+      },
+      { text: 'Cancel', style: 'cancel' },
+    ]);
+  }
+
+  async function _uploadPhoto(asset) {
+    setUploadingPhoto(true);
+    try {
+      const contentType = asset.mimeType || 'image/jpeg';
+      const res = await api.addItemImage(editing.stock_item_id, asset.base64, contentType);
+      setEPhotos(res.images || []);
+      setItems(prev => prev.map(i =>
+        i.stock_item_id === editing.stock_item_id ? { ...i, images: res.images } : i
+      ));
+    } catch (e) {
+      Alert.alert('Upload failed', e.message);
+    } finally {
+      setUploadingPhoto(false);
+    }
+  }
+
+  async function handleRemovePhoto(url) {
+    Alert.alert('Remove photo?', '', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Remove', style: 'destructive',
+        onPress: async () => {
+          try {
+            const res = await api.removeItemImage(editing.stock_item_id, url);
+            setEPhotos(res.images || []);
+            setItems(prev => prev.map(i =>
+              i.stock_item_id === editing.stock_item_id ? { ...i, images: res.images } : i
+            ));
+          } catch (e) {
+            Alert.alert('Error', e.message);
+          }
+        },
+      },
+    ]);
   }
 
   async function handleSave() {
@@ -680,6 +766,46 @@ export default function InventoryScreen() {
                 multiline
               />
 
+              {/* Photos */}
+              <Text style={s.fieldLabel}>Photos</Text>
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                style={{ marginBottom: 8 }}
+                contentContainerStyle={{ gap: 8, paddingVertical: 4 }}
+              >
+                {ePhotos.map((url, idx) => (
+                  <TouchableOpacity
+                    key={idx}
+                    onLongPress={() => handleRemovePhoto(url)}
+                    activeOpacity={0.8}
+                  >
+                    <Image source={{ uri: url }} style={s.photoThumb} />
+                    <View style={s.photoDeleteHint}>
+                      <Ionicons name="trash-outline" size={10} color="#fff" />
+                    </View>
+                  </TouchableOpacity>
+                ))}
+                <TouchableOpacity
+                  style={s.addPhotoBtn}
+                  onPress={handleAddPhoto}
+                  disabled={uploadingPhoto}
+                >
+                  {uploadingPhoto
+                    ? <ActivityIndicator color={C.accent} size="small" />
+                    : <>
+                        <Ionicons name="camera-outline" size={22} color={C.accent} />
+                        <Text style={s.addPhotoBtnText}>Add</Text>
+                      </>
+                  }
+                </TouchableOpacity>
+              </ScrollView>
+              {ePhotos.length === 0 && (
+                <Text style={s.photoHint}>
+                  At least one photo is required to list on eBay.
+                </Text>
+              )}
+
               {/* Toggles */}
               <View style={s.toggleRow}>
                 <View>
@@ -779,19 +905,19 @@ const s = StyleSheet.create({
   sortBtnText: { color: C.accent, fontSize: 12, fontWeight: '600' },
 
   // Filter chips
-  filterRow: { flexGrow: 0, marginTop: 8 },
-  filterRowContent: { paddingHorizontal: 12, paddingBottom: 8, gap: 6 },
+  filterRow: { flexGrow: 0, flexShrink: 0, marginTop: 8, paddingBottom: 4 },
+  filterRowContent: { paddingHorizontal: 12, paddingVertical: 4, gap: 6 },
   filterChip: {
     flexDirection: 'row', alignItems: 'center',
-    paddingHorizontal: 11, paddingVertical: 6,
+    paddingHorizontal: 11, paddingTop: 6, paddingBottom: 7,
     borderRadius: 999, borderWidth: 1, borderColor: C.border,
     backgroundColor: C.surface,
   },
   filterChipActive:     { borderColor: C.accent, backgroundColor: C.accentBg },
   filterChipDanger:     { borderColor: C.red,    backgroundColor: C.redBg },
-  filterChipText:       { color: C.text3, fontSize: 12 },
-  filterChipTextActive: { color: C.accent, fontWeight: '700' },
-  filterChipTextDanger: { color: C.red,   fontWeight: '700' },
+  filterChipText:       { color: C.text3, fontSize: 12, lineHeight: 16 },
+  filterChipTextActive: { color: C.accent, fontWeight: '700', lineHeight: 16 },
+  filterChipTextDanger: { color: C.red,   fontWeight: '700', lineHeight: 16 },
 
   // List items
   item: {
@@ -881,6 +1007,24 @@ const s = StyleSheet.create({
   chipActive:     { backgroundColor: C.accentBg, borderColor: C.accent },
   chipText:       { color: C.text3, fontSize: 12 },
   chipTextActive: { color: C.accent, fontWeight: '700' },
+
+  photoThumb: {
+    width: 80, height: 80, borderRadius: 8,
+    backgroundColor: C.surface,
+  },
+  photoDeleteHint: {
+    position: 'absolute', bottom: 4, right: 4,
+    backgroundColor: 'rgba(0,0,0,0.55)', borderRadius: 4,
+    padding: 3,
+  },
+  addPhotoBtn: {
+    width: 80, height: 80, borderRadius: 8,
+    borderWidth: 1, borderColor: C.border, borderStyle: 'dashed',
+    backgroundColor: C.surface,
+    alignItems: 'center', justifyContent: 'center', gap: 4,
+  },
+  addPhotoBtnText: { color: C.accent, fontSize: 11, fontWeight: '600' },
+  photoHint: { color: C.text3, fontSize: 11, marginTop: -4, marginBottom: 8 },
 
   toggleRow: {
     flexDirection: 'row', justifyContent: 'space-between',
