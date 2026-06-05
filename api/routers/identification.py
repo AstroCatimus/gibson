@@ -22,10 +22,32 @@ from api.models.identification import (
     IdentificationRequest,
     IdentificationResult,
     FollowUpRequest,
+    DeepLookupRequest,
+    DeepLookupResult,
 )
 from api.models.catalogue import MobileConfirmRequest
 
 router = APIRouter()
+
+
+def _apply_deep_lookup_trigger(result: IdentificationResult, pricing=None) -> IdentificationResult:
+    """Stage 1: attach deep lookup suggestion to any identification result."""
+    from api.services.deep_lookup import should_suggest
+    suggestion = should_suggest(
+        title=result.title,
+        author=result.author,
+        publisher=result.publisher,
+        publication_year=result.publication_year,
+        isbn_13=result.isbn_13,
+        format_=result.format,
+        suggested_price=result.suggested_price,
+        price_range_high=result.price_range.get("high") if result.price_range else None,
+        has_pricing_comps=bool(result.suggested_price),
+        identification_confidence=result.confidence,
+    )
+    result.suggest_deep_lookup = suggestion["suggest"]
+    result.suggest_reason = suggestion.get("reason") or None
+    return result
 
 
 @router.post("/barcode", response_model=IdentificationResult)
@@ -67,7 +89,7 @@ async def fast_path_barcode(
         # Fetch all physical copies in this store
         copies_raw = await lookup_copies(str(db_result["edition_id"]), store_id)
         copies = [StockCopy(**c) for c in copies_raw]
-        return IdentificationResult(
+        r = IdentificationResult(
             path="fast_path",
             work_id=db_result.get("work_id"),
             edition_id=db_result.get("edition_id"),
@@ -84,6 +106,7 @@ async def fast_path_barcode(
             routing_decision="confirm",
             copies=copies,
         )
+        return _apply_deep_lookup_trigger(r, pricing)
 
     # Not in local DB — run research agent (OL + Google Books + LOC + pricing)
     from agent.research import run_research
@@ -193,7 +216,7 @@ async def standard_path_photo(
         result.routing_decision = "slow_path"
         result.follow_up_request = "Queue for overnight research, or mark in-store only?"
 
-    return result
+    return _apply_deep_lookup_trigger(result)
 
 
 def _merge_research(result: IdentificationResult, research: dict) -> IdentificationResult:
@@ -455,5 +478,71 @@ async def confirm_identification(
         "inventory_status": item_row["status"],
         "created_at": item_row["created_at"].isoformat(),
     }
+
+
+@router.post("/deep-lookup", response_model=DeepLookupResult)
+async def deep_lookup(request: DeepLookupRequest):
+    """
+    Rare book deep lookup — three-stage pipeline.
+
+    Stage 2: Sonnet metadata triage (no tools, no images, ~600 tokens).
+             Returns early if book is clearly not collectible.
+    Stage 3: Sonnet full lookup (web search + images, ~3000-6000 tokens).
+             Only runs when Stage 2 clears.
+
+    If result.needs_photo is True, re-call with additional_image populated.
+    Maximum one additional photo request — second call never returns needs_photo.
+    If save_to_item is True and stock_item_id is provided, findings are saved
+    to condition_notes and is_signed/is_inscribed fields.
+    """
+    from api.services.deep_lookup import triage, run_deep_lookup, save_to_stock_item
+
+    # Stage 2 — triage
+    triage_result = await triage(
+        title=request.title,
+        author=request.author,
+        publisher=request.publisher,
+        year=request.publication_year,
+        isbn=request.isbn_13,
+    )
+
+    if not triage_result.get("proceed", True):
+        return DeepLookupResult(
+            triage_proceed=False,
+            triage_reason=triage_result.get("reason", ""),
+            significance_summary="Nothing significant found for this title.",
+        )
+
+    # Stage 3 — full deep lookup
+    result = await run_deep_lookup(
+        title=request.title,
+        author=request.author,
+        publisher=request.publisher,
+        year=request.publication_year,
+        isbn=request.isbn_13,
+        images=request.images,
+        additional_image=request.additional_image,
+    )
+
+    result.triage_reason = triage_result.get("reason", "")
+
+    # Never request a photo on a second call (additional_image already provided)
+    if request.additional_image:
+        result.needs_photo = False
+        result.photo_request_page = None
+        result.photo_request_reason = None
+
+    # Save findings if requested
+    if request.save_to_item and request.stock_item_id:
+        try:
+            await save_to_stock_item(request.stock_item_id, result)
+        except Exception as e:
+            import logging
+            logging.getLogger("gibson.identification").warning(
+                "Failed to save deep lookup to stock item %s: %s",
+                request.stock_item_id, e,
+            )
+
+    return result
 
 

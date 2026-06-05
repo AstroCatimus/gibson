@@ -87,6 +87,9 @@ export const api = {
   confirmIdentification: (data) =>
     request('POST', '/api/identification/confirm', data),
 
+  deepLookup: (data) =>
+    request('POST', '/api/identification/deep-lookup', data),
+
   // ── Pricing ─────────────────────────────────────────────────
   getPricing: (params) =>
     request('POST', '/api/pricing/lookup', params),

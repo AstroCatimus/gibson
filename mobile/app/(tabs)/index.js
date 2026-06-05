@@ -12,6 +12,7 @@ import {
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { router } from 'expo-router';
 import { api } from '../../src/lib/api';
+import { storeScanPhotos, clearScanPhotos } from '../../src/lib/scan_session';
 import { C } from '../../src/lib/theme';
 
 const PHOTO_STEPS = [
@@ -103,6 +104,7 @@ export default function ScanScreen() {
     setPhotos([]);
     setProcessing(false);
     setKnownIsbn(null);
+    clearScanPhotos();
   }
 
   async function capturePhoto() {
@@ -117,6 +119,8 @@ export default function ScanScreen() {
       } else {
         setProcessing(true);
         const [cover, title, copyright] = next;
+        // Store photos for deep lookup before navigating away
+        storeScanPhotos(cover.base64, title.base64, copyright.base64);
         const result = await api.identifyPhoto(cover.base64, [title.base64, copyright.base64]);
         if (knownIsbn && !result.isbn_13) result.isbn_13 = knownIsbn;
         setTimeout(() => setTorch(false), 500);
