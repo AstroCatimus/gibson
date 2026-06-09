@@ -1,7 +1,7 @@
 """
 LOC MARC21 Catalog Import.
 
-Imports Library of Congress MARC21 binary records into gibson_source_record.
+Imports Library of Congress MARC21 binary records into gibson_edition_source.
 Used for both the general catalog and authority files.
 
 Requires: pymarc (pip install pymarc)
@@ -97,7 +97,7 @@ async def _import_catalog_record(record, pool, stats: dict):
 
     await execute(
         pool,
-        """INSERT INTO gibson_source_record
+        """INSERT INTO gibson_edition_source
            (source, source_id, raw_data, normalized_title, normalized_author, isbn_13, trust_tier)
            VALUES ('loc_catalog', $1, $2::jsonb, $3, $4, $5, 4)
            ON CONFLICT DO NOTHING""",
@@ -143,7 +143,7 @@ async def _import_authority_record(record, pool, stats: dict):
 
     await execute(
         pool,
-        """INSERT INTO gibson_source_record
+        """INSERT INTO gibson_edition_source
            (source, source_id, raw_data, normalized_author, trust_tier)
            VALUES ('loc_authorities', $1, $2::jsonb, $3, 4)
            ON CONFLICT DO NOTHING""",

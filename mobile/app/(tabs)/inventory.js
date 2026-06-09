@@ -15,8 +15,7 @@ import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { api } from '../../src/lib/api';
 import { C, COND_COLOR } from '../../src/lib/theme';
-
-const GRADES   = ['Fine', 'Very Good+', 'Very Good', 'Good+', 'Good', 'Fair', 'Poor'];
+import { GRADES } from '../../src/lib/grades';
 const STATUSES = ['AVAILABLE', 'LISTED', 'HOLD', 'IN_STORE_ONLY', 'WITHDRAWN'];
 
 const STATUS_LABEL = {
@@ -137,8 +136,8 @@ export default function InventoryScreen() {
     const storeId = storeIdOverride ?? selectedStoreId;
     try {
       const [inv, st, sec] = await Promise.all([
-        api.getInventory(buildParams({ offset: 0 }), storeId),
-        api.getInventoryStats(storeId),
+        api.getInventory(buildParams({ offset: 0 })),
+        api.getInventoryStats(),
         api.getSections(),
       ]);
       const list = inv.items || inv || [];
@@ -156,7 +155,7 @@ export default function InventoryScreen() {
     setLoadingMore(true);
     try {
       // buildParams reads filtersRef.current — always current, never stale.
-      const inv  = await api.getInventory(buildParams({ offset }), selectedStoreId);
+      const inv  = await api.getInventory(buildParams({ offset }));
       const list = inv.items || inv || [];
       setItems(prev => [...prev, ...list]);
       setOffset(prev => prev + list.length);
@@ -508,7 +507,7 @@ export default function InventoryScreen() {
         ))}
 
         {/* Condition chips */}
-        {['Fine', 'Very Good+', 'Very Good', 'Good', 'Poor'].map(g => {
+        {GRADES.map(g => {
           const active = filterCondition === g;
           const col    = COND_COLOR[g] || C.text3;
           return (

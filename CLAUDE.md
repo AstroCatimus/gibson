@@ -10,7 +10,7 @@
 | Schema | Work → Edition → Stock Item (FRBR). Originated by Mitch. |
 | Source records | Immutable JSONB blobs. Never deleted, never compacted. |
 | AI writes | Never directly to catalog. Human review is absolute. |
-| Pricing gate | No online listing without Vialibri lookup. |
+| Pricing gate | No online listing without a gate comp lookup (currently BookFinder; Vialibri sanctioned API when partnership lands). |
 | Pricing paths | Field-tool and research share zero code paths. |
 | Cost basis | Never leaves the owning store. Enforced at query level. |
 | Dust jacket | Bibliographic object. Three-state field. Never folded into book grade. |
@@ -34,9 +34,11 @@
 **Database:** PostgreSQL via Supabase (Year 1). Extensions: pg_trgm, uuid-ossp, pgvector (post-migration).
 
 **AI (Claude API):**
-- Vision + identification: `claude-sonnet-4-6`
-- Triage + dedup: `claude-haiku-4-5` (read from `settings.anthropic_triage_model`)
-- Escalation (hard cases): `claude-opus-4-7`
+- Vision + identification (fast path): `claude-haiku-4-5-20251001` (`settings.anthropic_vision_model`)
+- Vision escalation (low-confidence covers): `claude-sonnet-4-6` (`settings.anthropic_vision_escalation_model`)
+- Research agent: `claude-haiku-4-5-20251001` (`settings.anthropic_research_model`)
+- Deep lookup triage + full assessment: Sonnet via `settings.anthropic_research_model` — set to Sonnet in env for deep lookup quality
+- Opus is not wired. Add it as an explicit escalation path with its own env var when warranted.
 - Prompt caching active on all calls. Batch API for async workloads.
 
 **Code rules:**
@@ -152,10 +154,10 @@ DATABASE_POOL_SIZE=10
 
 ANTHROPIC_API_KEY=
 ANTHROPIC_API_BASE=https://api.anthropic.com
-ANTHROPIC_VISION_MODEL=claude-sonnet-4-6
-ANTHROPIC_TRIAGE_MODEL=claude-haiku-4-5-20251001
+ANTHROPIC_VISION_MODEL=claude-haiku-4-5-20251001
+ANTHROPIC_VISION_ESCALATION_MODEL=claude-sonnet-4-6
 ANTHROPIC_SYNTHESIS_MODEL=claude-haiku-4-5-20251001
-ANTHROPIC_ESCALATION_MODEL=claude-opus-4-7
+ANTHROPIC_RESEARCH_MODEL=claude-haiku-4-5-20251001
 ANTHROPIC_ENABLE_BATCH=true
 ANTHROPIC_PROMPT_CACHE=true
 
@@ -168,12 +170,7 @@ EBAY_DEV_ID=
 BIBLIO_API_KEY=
 WHATNOT_API_KEY=
 
-R2_ACCOUNT_ID=
-R2_ACCESS_KEY_ID=
-R2_SECRET_ACCESS_KEY=
-R2_BUCKET_NAME=gibson-images
-USE_LOCAL_IMAGE_STORE=false
-LOCAL_IMAGE_PATH=/data/images
+LOCAL_IMAGE_PATH=/data/images    # dev fallback — production uses Supabase Storage (bucket: gibson-images)
 
 STORE_DL_ID=
 STORE_MG_ID=
@@ -194,15 +191,18 @@ CONVERSATION_LOGGER=true
 
 **Working:** Supabase + all migrations, `./start.sh`, Expo mobile app, API routing, logging (`logs/gibson.log`).
 
-**Built / in dev (not tested on real data):** Amazon + Ka-Zam import, defrag shelf verification, identification endpoints, ghostbook router.
+**Built / in dev (not tested on real data):** Amazon + Ka-Zam import, defrag shelf verification, identification endpoints, ghostbook router, deep lookup pipeline (Serper + Sonnet).
 
 **Not started / stub:** Biblio sync, price refresh worker, dust jacket schema migration, store membership gate (`get_store_id` trusts any header — blocker before external members).
 
-**Deleted:** Multi-source research agent. Moving to direct Claude API integration.
+**Research agent (`agent/research.py`) is live and central** to both fast path (barcode miss) and standard path (cover photo). It runs parallel tool calls with hard timeouts, prompt caching, structured output with per-field confidence, and routes to GHOST_BOOK when no institutional record is found. It never writes to the catalogue — returns a result for human confirmation only.
+
+**Local-first ML deferred:** The local LLM training pipeline (qlora) is empty stubs as of migration 015. Inference is Claude API + cloud for the bridge period. Deferred to the August–September hardware window. Member data portability is preserved by construction in the meantime — no training data is held outside the co-op's own DB.
 
 **Known gaps:**
 - Import is sequential — 60k books ≈ 3–4 hours. Needs batching.
-- Condition chips in Found-Update modal use short codes (`VG+`) but DB expects full words.
+- Store isolation enforced by header trust only — `get_store_id` accepts any `X-Store-Id` header and falls back to Driftless. RLS in migration 013 is inert because the API connects as the service role, which bypasses RLS by design. Must be fixed before any store other than Driftless uses this system.
+- Ghost Book `/confirm` and Catalogue `/confirm` are stubs — they return 200 without writing anything. Do not wire UI to them.
 - No canonical frontend decision yet (Expo vs PWA).
 
 ---

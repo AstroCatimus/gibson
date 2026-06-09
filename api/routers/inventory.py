@@ -294,7 +294,7 @@ async def remove_image(
 
 @router.get("/images/stock/{filename}")
 async def serve_local_image(filename: str):
-    """Serve locally stored images (development only — use R2 in production)."""
+    """Serve locally stored images (development fallback — production uses Supabase Storage)."""
     path = os.path.join(settings.local_image_path, "stock", filename)
     if not os.path.exists(path):
         raise HTTPException(status_code=404, detail="Image not found")

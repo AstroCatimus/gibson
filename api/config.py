@@ -32,10 +32,13 @@ class Settings(BaseSettings):
     booksrun_api_key: str = ""
     booksrun_affiliate_id: str = ""
     bookscouter_api_key: str = ""
-    vialibri_base_url: str = "https://www.vialibri.net"
+    vialibri_base_url: str = ""    # reserved for sanctioned Vialibri API — not yet wired
     ebay_app_id: str = ""
     ebay_cert_id: str = ""
     ebay_dev_id: str = ""
+
+    # Deep lookup search
+    serper_api_key: str = ""
 
     # Channels
     biblio_api_key: str = ""
@@ -62,8 +65,6 @@ class Settings(BaseSettings):
     # Store IDs (set after seeding)
     store_dl_id: str = "a1b2c3d4-0001-4000-8000-000000000001"
     store_mg_id: str = "a1b2c3d4-0002-4000-8000-000000000002"
-    dl_store_id: str = "a1b2c3d4-0001-4000-8000-000000000001"
-    mg_store_id: str = "a1b2c3d4-0002-4000-8000-000000000002"
     default_store_id: str = "a1b2c3d4-0001-4000-8000-000000000001"
 
     # Feature flags

@@ -82,6 +82,7 @@ from api.routers import (
     defrag,
     imports,
     listings,
+    deep_lookup,
 )
 
 
@@ -133,6 +134,7 @@ app.include_router(stores.router,       prefix="/api/stores",       tags=["store
 app.include_router(defrag.router,       prefix="/api/defrag",       tags=["defrag"])
 app.include_router(imports.router,      prefix="/api/import",       tags=["import"])
 app.include_router(listings.router,     prefix="/api/listings",     tags=["listings"])
+app.include_router(deep_lookup.router,  prefix="/api",              tags=["deep-lookup"])
 
 # ─── PWA Static Files ────────────────────────────────────────
 

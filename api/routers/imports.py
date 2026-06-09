@@ -213,7 +213,7 @@ async def _upsert(parsed: dict, store_id: str, store_prefix: str,
     # Idempotency — skip if already imported
     if ext_id:
         exists = await fetchrow(
-            "SELECT source_record_id FROM gibson_source_record WHERE external_id = $1 AND source = $2",
+            "SELECT receipt_id FROM gibson_import_receipt WHERE external_id = $1 AND source = $2",
             ext_id, parsed["source"],
         )
         if exists:
@@ -315,7 +315,7 @@ async def _upsert(parsed: dict, store_id: str, store_prefix: str,
     # Record source for idempotency + audit
     await execute(
         """
-        INSERT INTO gibson_source_record
+        INSERT INTO gibson_import_receipt
             (source, external_id, isbn_norm, raw_data, stock_item_id)
         VALUES ($1, $2, $3, $4::jsonb, $5)
         """,
@@ -367,7 +367,7 @@ async def _process(job: dict, content: bytes, parser, trust_tier: int):
         already_done: set = set()
         if ext_ids:
             found = await fetch(
-                "SELECT external_id FROM gibson_source_record "
+                "SELECT external_id FROM gibson_import_receipt "
                 "WHERE external_id = ANY($1) AND source = $2",
                 ext_ids, source,
             )
@@ -397,7 +397,7 @@ async def _process(job: dict, content: bytes, parser, trust_tier: int):
                 FROM (
                     SELECT sr.stock_item_id, v.note
                     FROM unnest($1::text[], $2::text[]) AS v(external_id, note)
-                    JOIN gibson_source_record sr
+                    JOIN gibson_import_receipt sr
                       ON sr.external_id = v.external_id AND sr.source = $3
                 ) matched
                 WHERE si.stock_item_id = matched.stock_item_id
@@ -647,7 +647,7 @@ async def _process(job: dict, content: bytes, parser, trust_tier: int):
 
             valid_sl  = valid[sl]
             await execute(
-                "INSERT INTO gibson_source_record "
+                "INSERT INTO gibson_import_receipt "
                 "    (source, external_id, isbn_norm, raw_data, stock_item_id) "
                 "SELECT * FROM unnest($1::text[], $2::text[], $3::text[], $4::jsonb[], $5::uuid[])",
                 [p["source"] for p in valid_sl],

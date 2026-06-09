@@ -169,14 +169,183 @@ async def create_stock_item(
 
 
 @router.post("/confirm")
-async def confirm_and_catalogue(request: ConfirmIdentificationRequest):
+async def confirm_and_catalogue(
+    request: ConfirmIdentificationRequest,
+    store_id: str = Depends(get_store_id),
+    employee_id: Optional[str] = Depends(get_employee_id),
+):
     """
-    Full confirmation flow: dealer taps confirm.
-    Creates Work + Edition + Stock Item in a single transaction.
-    Logs any overrides as correction records (audit trail).
+    Full confirmation flow: dealer taps confirm on a research result.
+    Creates Work + Agent + Edition + Stock Item in a single transaction.
+    Logs overrides as correction records (audit trail).
     """
-    # This is the most critical endpoint — creates the full catalog chain
-    return {"status": "confirmed", "message": "Catalogue records created"}
+    res = request.identification_result
+
+    def _f(key, alt=None):
+        """Extract a scalar value from a field that may be {'value': x} or a plain scalar."""
+        v = res.get(key)
+        if isinstance(v, dict):
+            v = v.get("value")
+        if v is not None:
+            return v
+        if alt:
+            w = res.get(alt)
+            return w if not isinstance(w, dict) else w.get("value")
+        return None
+
+    title      = _f("title") or "Untitled"
+    author     = _f("author")
+    publisher  = _f("publisher")
+    year       = _f("year", "publication_year")
+    isbn_13    = _f("isbn_13")
+
+    # Apply dealer overrides
+    for field, value in (request.overrides or {}).items():
+        if field == "title":       title = value
+        elif field == "author":    author = value
+        elif field == "publisher": publisher = value
+        elif field == "year":      year = value
+        elif field == "isbn_13":   isbn_13 = value
+
+    async with get_transaction() as conn:
+        # ── Work ───────────────────────────────────────────────────────
+        title_sort = title.lower().lstrip("the ").lstrip("a ").lstrip("an ").strip()
+        work_row = await conn.fetchrow(
+            """
+            INSERT INTO gibson_work (title, title_sort, work_type, confidence)
+            VALUES ($1, $2, 'monograph', 0.80)
+            RETURNING work_id
+            """,
+            title, title_sort,
+        )
+        work_id = str(work_row["work_id"])
+
+        # ── Agent (author) ─────────────────────────────────────────────
+        if author:
+            author = author.strip()
+            parts = author.rsplit(" ", 1)
+            name_sort = f"{parts[-1]}, {parts[0]}" if len(parts) > 1 else author
+            agent_row = await conn.fetchrow(
+                "SELECT agent_id FROM gibson_agent WHERE name_display = $1", author
+            )
+            if not agent_row:
+                agent_row = await conn.fetchrow(
+                    """
+                    INSERT INTO gibson_agent (name_display, name_sort, agent_type)
+                    VALUES ($1, $2, 'person') RETURNING agent_id
+                    """,
+                    author, name_sort,
+                )
+            if agent_row:
+                await conn.execute(
+                    """
+                    INSERT INTO gibson_work_agent (work_id, agent_id, role, role_order)
+                    VALUES ($1, $2, 'author', 1) ON CONFLICT DO NOTHING
+                    """,
+                    work_id, str(agent_row["agent_id"]),
+                )
+
+        # ── Edition ────────────────────────────────────────────────────
+        edition_row = await conn.fetchrow(
+            """
+            INSERT INTO gibson_edition (work_id, isbn_13, publication_year, confidence)
+            VALUES ($1, $2, $3, 0.80)
+            RETURNING edition_id
+            """,
+            work_id, isbn_13, year,
+        )
+        edition_id = str(edition_row["edition_id"])
+
+        # ── Publisher ──────────────────────────────────────────────────
+        if publisher:
+            pub_row = await conn.fetchrow(
+                "SELECT publisher_id FROM gibson_publisher WHERE name_display = $1", publisher
+            )
+            if not pub_row:
+                pub_row = await conn.fetchrow(
+                    """
+                    INSERT INTO gibson_publisher (name_display, name_sort, publisher_type)
+                    VALUES ($1, $2, 'commercial') RETURNING publisher_id
+                    """,
+                    publisher, publisher.lower(),
+                )
+            if pub_row:
+                await conn.execute(
+                    """
+                    INSERT INTO gibson_edition_publisher (edition_id, publisher_id, role)
+                    VALUES ($1, $2, 'publisher') ON CONFLICT DO NOTHING
+                    """,
+                    edition_id, str(pub_row["publisher_id"]),
+                )
+
+        # ── SKU ────────────────────────────────────────────────────────
+        sku = None
+        if employee_id:
+            init_row = await conn.fetchrow(
+                "SELECT initials FROM gibson_employee WHERE employee_id = $1", employee_id
+            )
+            if init_row and init_row["initials"]:
+                seq = await conn.fetchrow("SELECT nextval('gibson_sku_seq') as seq")
+                sku = f"{init_row['initials']}-{seq['seq']}"
+        if not sku:
+            seq = await conn.fetchrow("SELECT nextval('gibson_sku_seq') as seq")
+            prefix_row = await conn.fetchrow(
+                "SELECT prefix FROM gibson_store WHERE store_id = $1", store_id
+            )
+            prefix = prefix_row["prefix"] if prefix_row else "GS"
+            sku = f"{prefix}-{seq['seq']}"
+
+        # ── Location ───────────────────────────────────────────────────
+        location_id = None
+        if request.section_code:
+            loc_row = await conn.fetchrow(
+                "SELECT location_id FROM gibson_location WHERE store_id = $1 AND section_code = $2",
+                store_id, request.section_code,
+            )
+            if loc_row:
+                location_id = str(loc_row["location_id"])
+
+        # ── Stock Item ─────────────────────────────────────────────────
+        item_row = await conn.fetchrow(
+            """
+            INSERT INTO gibson_stock_item (
+                edition_id, gibson_sku, store_id,
+                condition_grade, condition_mode,
+                asking_price, cost_basis,
+                location_id
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            RETURNING stock_item_id, gibson_sku, status, created_at
+            """,
+            edition_id, sku, store_id,
+            request.condition_grade, request.condition_mode,
+            request.asking_price, request.cost_basis,
+            location_id,
+        )
+
+        # ── Overrides audit log ────────────────────────────────────────
+        if request.overrides:
+            from api.services.correction import log_correction
+            for field, corrected_value in request.overrides.items():
+                original_value = res.get(field, {}).get("value") if isinstance(res.get(field), dict) else res.get(field)
+                await log_correction(
+                    edition_id=edition_id,
+                    field_name=field,
+                    original_value=str(original_value) if original_value is not None else None,
+                    corrected_value=str(corrected_value),
+                    corrected_by=employee_id,
+                    correction_reason="dealer_override_at_confirm",
+                )
+
+    return {
+        "status": "confirmed",
+        "stock_item_id": str(item_row["stock_item_id"]),
+        "gibson_sku": item_row["gibson_sku"],
+        "edition_id": edition_id,
+        "work_id": work_id,
+        "inventory_status": item_row["status"],
+        "created_at": item_row["created_at"].isoformat(),
+    }
 
 
 @router.get("/search")

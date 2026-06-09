@@ -12,16 +12,17 @@ const BASE_URL = process.env.EXPO_PUBLIC_API_BASE_URL || 'http://localhost:8000'
 async function getHeaders() {
   const { data: { session } } = await supabase.auth.getSession();
 
-  const meta       = session?.user?.user_metadata || {};
-  const storeId    = meta.store_id || '';        // set during onboarding; empty until store is joined
-  const employeeId = session?.user?.id || '';
-  const name       = meta.display_name || '';
-  const email      = session?.user?.email || '';
+  const meta  = session?.user?.user_metadata || {};
+  const name  = meta.display_name || '';
+  const email = session?.user?.email || '';
+  const token = session?.access_token || '';
 
   return {
     'Content-Type':     'application/json',
-    'X-Store-Id':       storeId,
-    'X-Employee-Id':    employeeId,
+    // store_id and employee_id are derived from the verified JWT on the server side.
+    // We still send them as convenience headers for logging, but the server
+    // ignores them for authorization — only the Bearer token is trusted.
+    'Authorization':    token ? `Bearer ${token}` : '',
     'X-Employee-Email': email,
     'X-Employee-Name':  name,
   };
@@ -87,8 +88,19 @@ export const api = {
   confirmIdentification: (data) =>
     request('POST', '/api/identification/confirm', data),
 
-  deepLookup: (data) =>
-    request('POST', '/api/identification/deep-lookup', data),
+  // ── Deep Lookup ─────────────────────────────────────────────
+  deepLookupTrigger: (researchResult) =>
+    request('POST', '/api/deep-lookup/trigger', { research_result: researchResult }),
+
+  deepLookupRun: (researchResult, photos) =>
+    request('POST', '/api/deep-lookup/run', { research_result: researchResult, photos: photos || [] }),
+
+  deepLookupFollowup: (originalResult, newPhoto, researchResult) =>
+    request('POST', '/api/deep-lookup/followup', {
+      original_result:  originalResult,
+      new_photo:        newPhoto,
+      research_result:  researchResult,
+    }),
 
   // ── Pricing ─────────────────────────────────────────────────
   getPricing: (params) =>
@@ -102,13 +114,11 @@ export const api = {
     request('POST', '/api/catalogue/stock-item', data),
 
   // ── Inventory ───────────────────────────────────────────────
-  getInventory: (params = '', storeId = null) =>
-    request('GET', `/api/inventory${params}`, null,
-      storeId ? { 'X-Store-Id': storeId } : {}),
+  getInventory: (params = '') =>
+    request('GET', `/api/inventory${params}`),
 
-  getInventoryStats: (storeId = null) =>
-    request('GET', '/api/inventory/count', null,
-      storeId ? { 'X-Store-Id': storeId } : {}),
+  getInventoryStats: () =>
+    request('GET', '/api/inventory/count'),
 
   getItemBySku: (sku) =>
     request('GET', `/api/inventory/sku/${encodeURIComponent(sku)}`),

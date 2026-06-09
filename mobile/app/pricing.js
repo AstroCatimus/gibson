@@ -83,7 +83,7 @@ export default function PricingScreen() {
   const allComps = pricing
     ? [
         ...(pricing.gibson_pos || []),
-        ...(pricing.vialibri || []),
+        ...(pricing.gate || []),
         ...(pricing.ebay_sold || []),
         ...(pricing.ebay_active || []),
         ...(pricing.booksrun || []),
@@ -122,7 +122,7 @@ export default function PricingScreen() {
       {pricing && !loading && (
         <>
           {/* No comps gate */}
-          {!pricing.vialibri_has_comps && (
+          {!pricing.gate_has_comps && (
             <View style={[s.card, s.gateCard]}>
               <Text style={s.gateTitle}>No market comps found</Text>
               <Text style={s.gateText}>

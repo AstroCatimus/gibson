@@ -2,7 +2,7 @@
 ISFDB Dump Import — 2.38M records.
 
 Imports the Internet Speculative Fiction Database MySQL dump into
-gibson_source_record for Phase 2 local lookups.
+gibson_edition_source for Phase 2 local lookups.
 
 Download: https://isfdb.org/wiki/index.php/ISFDB_Downloads
 Format: MySQL dump → convert to CSV or parse SQL INSERT statements.
@@ -31,7 +31,7 @@ BATCH_SIZE = 1000
 
 async def import_isfdb(filepath: str, batch_size: int = BATCH_SIZE):
     """
-    Import ISFDB records into gibson_source_record.
+    Import ISFDB records into gibson_edition_source.
 
     Expected CSV columns: title_id, title, author, year, isbn, publisher,
     title_type, series, series_num, language
@@ -81,7 +81,7 @@ async def _flush_batch(batch: list[dict], pool) -> int:
         try:
             await execute(
                 pool,
-                """INSERT INTO gibson_source_record
+                """INSERT INTO gibson_edition_source
                    (source, source_id, raw_data, normalized_title, normalized_author, isbn_13, trust_tier)
                    VALUES ('isfdb', $1, $2::jsonb, $3, $4, $5, 4)
                    ON CONFLICT DO NOTHING""",

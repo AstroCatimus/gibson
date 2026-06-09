@@ -1,12 +1,12 @@
 /**
  * Gibson — Deep Lookup Screen.
- * Rare book assessment: edition, value, signatures, sources.
+ * Rare book assessment: edition, value, signatures, anomalies.
  *
  * Flow:
- *  1. Runs Stage 2 triage (Sonnet, metadata-only, cheap)
- *  2. If proceed: runs Stage 3 full lookup (Sonnet + web search + images)
- *  3. If Claude needs one more photo: shows photo request
- *  4. Results: assessed value vs Gibson price, edition notes, sources
+ *  1. Stage 1 trigger (free, instant) — shows suggestion card with reasons
+ *  2. Dealer taps Run — Stage 2 triage + Stage 3 search + assess (~20-60s)
+ *  3. If needs_more_photos — shows photo request, dealer provides or skips
+ *  4. Results: dealer_action, value range, edition, physical checks, signature
  */
 
 import { useState, useEffect, useRef } from 'react';
@@ -20,146 +20,207 @@ import { api } from '../src/lib/api';
 import { getScanPhotoArray } from '../src/lib/scan_session';
 import { C } from '../src/lib/theme';
 
+// Build the research_result shape the new pipeline expects from the params
+// passed by identify.js. Confidence is set to 1.0 for confirmed fields.
+function buildResearchResult(title, author, publisher, year, isbn) {
+  return {
+    title:             { value: title || '',       confidence: title    ? 1.0 : 0.0, source: 'identification' },
+    author:            { value: author || '',      confidence: author   ? 1.0 : 0.0, source: 'identification' },
+    publisher:         { value: publisher || null, confidence: publisher ? 0.9 : 0.0, source: 'identification' },
+    year:              { value: year ? parseInt(year) : null, confidence: year ? 0.9 : 0.0, source: 'identification' },
+    isbn_13:           { value: isbn || null,      confidence: isbn     ? 1.0 : 0.0, source: 'identification' },
+    edition_statement: { value: null,              confidence: 0.0,                  source: 'identification' },
+    subjects:          { value: [],                confidence: 0.0,                  source: 'identification' },
+    page_count:        { value: null,              confidence: 0.0,                  source: 'identification' },
+    pricing: {
+      suggested_price: null,
+      range_low:       null,
+      range_high:      null,
+      comp_count:      0,
+      sources:         [],
+    },
+    overall_confidence: title && author ? 0.9 : 0.5,
+    routing: isbn ? 'CONFIRM' : 'REVIEW',
+  };
+}
+
 export default function DeepLookupScreen() {
   const params = useLocalSearchParams();
   const { title, author, publisher, year, isbn, stockItemId } = params;
 
-  const [loading, setLoading]     = useState(true);
-  const [status, setStatus]       = useState('Checking collectibility…');
-  const [result, setResult]       = useState(null);
-  const [saved, setSaved]         = useState(false);
-  const [saving, setSaving]       = useState(false);
-  const [photoLoading, setPhotoLoading] = useState(false);
+  const [phase, setPhase]       = useState('trigger');   // trigger | running | result | photo_request
+  const [reasons, setReasons]   = useState([]);          // Stage 1 reasons
+  const [result, setResult]     = useState(null);
+  const [running, setRunning]   = useState(false);
+  const [status, setStatus]     = useState('');
 
-  // Only ever use the photos that were taken during the scan
-  const scanImages = useRef(getScanPhotoArray());
+  const scanImages    = useRef(getScanPhotoArray());
+  const researchResult = useRef(buildResearchResult(title, author, publisher, year, isbn));
 
-  useEffect(() => { runLookup(scanImages.current, null); }, []);
+  // Stage 1 — run on mount, free
+  useEffect(() => {
+    (async () => {
+      try {
+        const data = await api.deepLookupTrigger(researchResult.current);
+        setReasons(data.reasons || []);
+        setPhase('trigger');
+      } catch {
+        // If trigger fails just show the run button anyway
+        setPhase('trigger');
+      }
+    })();
+  }, []);
 
-  async function runLookup(images, additionalImage) {
-    setLoading(true);
-    setResult(null);
+  async function handleRun() {
+    setRunning(true);
+    setStatus('Checking collectibility…');
     try {
-      setStatus('Checking collectibility…');
-      const data = await api.deepLookup({
-        title:            title || null,
-        author:           author || null,
-        publisher:        publisher || null,
-        publication_year: year ? parseInt(year) : null,
-        isbn_13:          isbn || null,
-        images:           images || [],
-        additional_image: additionalImage || null,
-        stock_item_id:    stockItemId || null,
-        save_to_item:     false,
-      });
+      // Stagger status messages while waiting
+      const timer1 = setTimeout(() => setStatus('Searching auction records…'), 5000);
+      const timer2 = setTimeout(() => setStatus('Analysing edition points…'), 15000);
+      const timer3 = setTimeout(() => setStatus('Almost done…'), 30000);
 
-      if (!data.triage_proceed) {
-        setResult({ _not_collectible: true, reason: data.triage_reason || data.significance_summary });
+      const data = await api.deepLookupRun(researchResult.current, scanImages.current);
+
+      clearTimeout(timer1);
+      clearTimeout(timer2);
+      clearTimeout(timer3);
+
+      if (data.stage_reached === 2) {
+        // Stage 2 SKIP — show dealer_action as a plain result
+        setResult({ _skipped: true, reason: data.dealer_action });
+        setPhase('result');
         return;
       }
 
-      setStatus('Researching edition and value…');
       setResult(data);
+      setPhase(data.needs_more_photos ? 'photo_request' : 'result');
     } catch (e) {
       Alert.alert('Error', e.message);
-      router.back();
     } finally {
-      setLoading(false);
+      setRunning(false);
       setStatus('');
     }
   }
 
-  async function handlePhotoRequest() {
-    Alert.alert('Take a photo', result.photo_request_reason || '', [
-      {
-        text: 'Camera',
-        onPress: async () => {
-          const perm = await ImagePicker.requestCameraPermissionsAsync();
-          if (!perm.granted) return;
-          const res = await ImagePicker.launchCameraAsync({ quality: 0.8, base64: true });
-          if (!res.canceled) {
-            setPhotoLoading(true);
-            await runLookup(scanImages.current, res.assets[0].base64);
-            setPhotoLoading(false);
-          }
-        },
-      },
-      {
-        text: 'Skip',
-        onPress: async () => {
-          // Re-run without additional image — server won't ask again
-          setPhotoLoading(true);
-          const r = { ...result, needs_photo: false };
-          setResult(r);
-          setPhotoLoading(false);
-        },
-      },
-    ]);
-  }
-
-  async function handleSave() {
-    if (!stockItemId) {
-      Alert.alert('No item', 'Findings can only be saved after the book is confirmed into inventory.');
-      return;
-    }
-    setSaving(true);
+  async function handlePhotoProvided(photoBase64) {
+    setRunning(true);
+    setStatus('Updating assessment…');
     try {
-      await api.deepLookup({
-        title:            title || null,
-        author:           author || null,
-        publisher:        publisher || null,
-        publication_year: year ? parseInt(year) : null,
-        isbn_13:          isbn || null,
-        images:           scanImages.current,
-        stock_item_id:    stockItemId,
-        save_to_item:     true,
-      });
-      setSaved(true);
+      const data = await api.deepLookupFollowup(result, photoBase64, researchResult.current);
+      setResult(data);
+      setPhase('result');
     } catch (e) {
-      Alert.alert('Error saving', e.message);
+      Alert.alert('Error', e.message);
+      setPhase('result'); // Show original result on failure
     } finally {
-      setSaving(false);
+      setRunning(false);
+      setStatus('');
     }
   }
 
-  // ── Loading state ────────────────────────────────────────────
-  if (loading) {
+  async function promptForPhoto() {
+    Alert.alert(
+      result.photo_request || 'One more photo needed',
+      'Photograph the requested page or skip to see the current assessment.',
+      [
+        {
+          text: 'Take Photo',
+          onPress: async () => {
+            const perm = await ImagePicker.requestCameraPermissionsAsync();
+            if (!perm.granted) return;
+            const res = await ImagePicker.launchCameraAsync({ quality: 0.8, base64: true });
+            if (!res.canceled) await handlePhotoProvided(res.assets[0].base64);
+          },
+        },
+        {
+          text: 'Skip',
+          onPress: () => setPhase('result'),
+        },
+      ],
+    );
+  }
+
+  // ── Loading overlay ──────────────────────────────────────────
+  if (running) {
     return (
       <View style={s.loadingScreen}>
         <ActivityIndicator color={C.accent} size="large" />
         <Text style={s.loadingStatus}>{status}</Text>
-        <Text style={s.loadingHint}>Searching auction records and edition guides…</Text>
-      </View>
-    );
-  }
-
-  // ── Not collectible ──────────────────────────────────────────
-  if (result?._not_collectible) {
-    return (
-      <View style={s.loadingScreen}>
-        <Text style={s.notCollectibleIcon}>📚</Text>
-        <Text style={s.notCollectibleTitle}>Nothing significant found</Text>
-        <Text style={s.notCollectibleText}>{result.reason || 'This appears to be a standard copy with no notable collectible value.'}</Text>
-        <TouchableOpacity style={s.backBtn} onPress={() => router.back()}>
-          <Text style={s.backBtnText}>← Back</Text>
-        </TouchableOpacity>
       </View>
     );
   }
 
   // ── Photo request ────────────────────────────────────────────
-  if (result?.needs_photo && !photoLoading) {
+  if (phase === 'photo_request' && result) {
     return (
-      <View style={s.photoRequestScreen}>
-        <View style={s.photoRequestCard}>
-          <Text style={s.photoRequestIcon}>📄</Text>
-          <Text style={s.photoRequestPage}>{result.photo_request_page || 'One more page'}</Text>
-          <Text style={s.photoRequestReason}>{result.photo_request_reason}</Text>
-          <TouchableOpacity style={s.photoTakeBtn} onPress={handlePhotoRequest}>
-            <Text style={s.photoTakeBtnText}>📷  Take Photo</Text>
+      <View style={s.photoScreen}>
+        <View style={s.photoCard}>
+          <Text style={s.photoIcon}>📄</Text>
+          <Text style={s.photoTitle}>One more photo needed</Text>
+          <Text style={s.photoRequest}>{result.photo_request}</Text>
+          <TouchableOpacity style={s.photoBtn} onPress={promptForPhoto}>
+            <Text style={s.photoBtnText}>📷  Take Photo</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={s.photoSkipBtn} onPress={() => setResult({ ...result, needs_photo: false })}>
-            <Text style={s.photoSkipBtnText}>Skip — show results anyway</Text>
+          <TouchableOpacity style={s.photoSkip} onPress={() => setPhase('result')}>
+            <Text style={s.photoSkipText}>Skip — show current assessment</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
+  }
+
+  // ── Stage 1 trigger card ─────────────────────────────────────
+  if (phase === 'trigger') {
+    const hasReasons = reasons.length > 0;
+    return (
+      <View style={s.triggerScreen}>
+        <View style={s.triggerCard}>
+          <Text style={s.triggerIcon}>{hasReasons ? '⚡' : '📚'}</Text>
+          <Text style={s.triggerTitle}>
+            {hasReasons ? 'Potential collectible' : 'Deep Lookup'}
+          </Text>
+          {hasReasons ? (
+            <>
+              <Text style={s.triggerSub}>Flagged for these reasons:</Text>
+              {reasons.map((r, i) => (
+                <View key={i} style={s.reasonRow}>
+                  <Text style={s.reasonDot}>·</Text>
+                  <Text style={s.reasonText}>{r}</Text>
+                </View>
+              ))}
+              <Text style={s.triggerNote}>
+                Deep lookup searches auction records, edition guides, and analyses your photos.
+                Takes 20–60 seconds.
+              </Text>
+            </>
+          ) : (
+            <Text style={s.triggerNote}>
+              No automatic flags for this book. You can still run a deep lookup to check for
+              signed copies, first edition points, or unusual value.
+            </Text>
+          )}
+          <TouchableOpacity style={s.runBtn} onPress={handleRun}>
+            <Text style={s.runBtnText}>Run Deep Lookup</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={s.backLink} onPress={() => router.back()}>
+            <Text style={s.backLinkText}>← Back</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
+  }
+
+  // ── Skipped at Stage 2 ───────────────────────────────────────
+  if (result?._skipped) {
+    return (
+      <View style={s.triggerScreen}>
+        <View style={s.triggerCard}>
+          <Text style={s.triggerIcon}>📚</Text>
+          <Text style={s.triggerTitle}>Nothing significant found</Text>
+          <Text style={s.triggerNote}>{result.reason}</Text>
+          <TouchableOpacity style={s.backLink} onPress={() => router.back()}>
+            <Text style={s.backLinkText}>← Back</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -168,213 +229,121 @@ export default function DeepLookupScreen() {
 
   if (!result) return null;
 
-  const hasValue  = result.assessed_value_low != null || result.assessed_value_high != null;
-  const djWorth   = result.value_with_dj || result.value_without_dj;
-  const hasSig    = result.signature_detected;
-  const isFirst   = result.edition_printing === 'first';
-  const score     = result.significance_score || 0;
-  const scoreColor = score >= 0.7 ? C.accent : score >= 0.4 ? C.yellow : C.text3;
+  const hasAnomaly  = result.anomaly_found;
+  const hasValue    = result.anomaly_value_low != null || result.anomaly_value_high != null;
+  const hasSig      = result.signature_found;
+  const conf        = result.confidence || 0;
+  const confColor   = conf >= 0.7 ? C.accent : conf >= 0.4 ? C.yellow : C.text3;
 
+  // ── Full results ─────────────────────────────────────────────
   return (
     <ScrollView style={s.container} contentContainerStyle={s.content}>
 
       {/* Header */}
       <View style={s.headerCard}>
         <Text style={s.headerTitle} numberOfLines={2}>{title || 'Book'}</Text>
-        {author ? <Text style={s.headerAuthor}>{author}{year ? ` · ${year}` : ''}</Text> : null}
-        <View style={s.scoreRow}>
-          <View style={[s.scorePill, { borderColor: scoreColor, backgroundColor: scoreColor + '18' }]}>
-            <Text style={[s.scoreText, { color: scoreColor }]}>
-              {score >= 0.7 ? '⚡ High significance' : score >= 0.4 ? '◈ Moderate significance' : '· Low significance'}
+        {author ? (
+          <Text style={s.headerSub}>{author}{year ? ` · ${year}` : ''}</Text>
+        ) : null}
+        <View style={s.confRow}>
+          <View style={[s.confPill, { borderColor: confColor, backgroundColor: confColor + '18' }]}>
+            <Text style={[s.confText, { color: confColor }]}>
+              {conf >= 0.7 ? '⚡ High confidence' : conf >= 0.4 ? '◈ Medium confidence' : '· Low confidence'}
             </Text>
           </View>
-        </View>
-        {result.significance_summary ? (
-          <Text style={s.summaryText}>{result.significance_summary}</Text>
-        ) : null}
-      </View>
-
-      {/* Assessed Value */}
-      {hasValue && (
-        <View style={s.assessedCard}>
-          <Text style={s.assessedLabel}>ASSESSED VALUE  ·  deep lookup</Text>
-          <Text style={s.assessedRange}>
-            {result.assessed_value_low != null && result.assessed_value_high != null
-              ? `$${result.assessed_value_low.toFixed(0)} – $${result.assessed_value_high.toFixed(0)}`
-              : result.assessed_value_low != null
-                ? `from $${result.assessed_value_low.toFixed(0)}`
-                : `up to $${result.assessed_value_high.toFixed(0)}`}
-          </Text>
-          {result.assessed_value_reasoning ? (
-            <Text style={s.assessedReasoning}>{result.assessed_value_reasoning}</Text>
-          ) : null}
-          {djWorth && (
-            <View style={s.djRow}>
-              {result.value_with_dj ? (
-                <View style={s.djPill}>
-                  <Text style={s.djPillLabel}>With DJ</Text>
-                  <Text style={s.djPillValue}>{result.value_with_dj}</Text>
-                </View>
-              ) : null}
-              {result.value_without_dj ? (
-                <View style={[s.djPill, s.djPillDim]}>
-                  <Text style={[s.djPillLabel, { color: C.text3 }]}>Without DJ</Text>
-                  <Text style={[s.djPillValue, { color: C.text2 }]}>{result.value_without_dj}</Text>
-                </View>
-              ) : null}
+          {result.anomaly_type ? (
+            <View style={[s.typePill]}>
+              <Text style={s.typeText}>{result.anomaly_type.replace('_', ' ')}</Text>
             </View>
-          )}
-          {result.value_source_url ? (
-            <TouchableOpacity onPress={() => Linking.openURL(result.value_source_url)}>
-              <Text style={s.sourceLink}>View source ↗</Text>
-            </TouchableOpacity>
           ) : null}
         </View>
-      )}
-
-      {/* Gibson Suggested Price (from routing params or prior pricing) */}
-      <View style={s.gibsonCard}>
-        <Text style={s.gibsonLabel}>GIBSON SUGGESTED PRICE</Text>
-        <Text style={s.gibsonNote}>Set before deep lookup — consider revising if assessed value differs significantly.</Text>
       </View>
+
+      {/* Dealer action — the main instruction */}
+      {result.dealer_action ? (
+        <View style={[s.card, s.actionCard]}>
+          <Text style={s.actionLabel}>WHAT TO DO NOW</Text>
+          <Text style={s.actionText}>{result.dealer_action}</Text>
+        </View>
+      ) : null}
+
+      {/* Anomaly / value */}
+      {hasAnomaly && hasValue ? (
+        <View style={[s.card, s.valueCard]}>
+          <Text style={s.valueLabel}>ASSESSED VALUE  ·  deep lookup</Text>
+          <Text style={s.valueRange}>
+            {result.anomaly_value_low != null && result.anomaly_value_high != null
+              ? `$${result.anomaly_value_low.toFixed(0)} – $${result.anomaly_value_high.toFixed(0)}`
+              : result.anomaly_value_low != null
+                ? `from $${result.anomaly_value_low.toFixed(0)}`
+                : `up to $${result.anomaly_value_high.toFixed(0)}`}
+          </Text>
+          {result.baseline_value != null ? (
+            <Text style={s.baselineText}>
+              Baseline (standard copy): ${result.baseline_value.toFixed(0)}
+            </Text>
+          ) : null}
+          {result.anomaly_detail ? (
+            <Text style={s.anomalyDetail}>{result.anomaly_detail}</Text>
+          ) : null}
+        </View>
+      ) : null}
 
       {/* Edition assessment */}
-      {(result.edition_evidence?.length > 0 || result.edition_printing !== 'unknown') && (
+      {result.edition_assessment ? (
         <View style={s.card}>
           <Text style={s.cardLabel}>Edition Assessment</Text>
-          <View style={s.editionRow}>
-            <Text style={[s.editionPrinting, isFirst && { color: C.accent }]}>
-              {result.edition_printing === 'first' ? 'Likely First Edition'
-                : result.edition_printing === 'later' ? 'Later Printing'
-                : 'Edition Unknown'}
-            </Text>
-            <View style={[s.confBadge, {
-              backgroundColor: result.edition_confidence === 'high' ? C.greenBg
-                : result.edition_confidence === 'medium' ? C.accentBg : C.surface,
-              borderColor: result.edition_confidence === 'high' ? C.green
-                : result.edition_confidence === 'medium' ? C.accent : C.border,
-            }]}>
-              <Text style={[s.confBadgeText, {
-                color: result.edition_confidence === 'high' ? C.green
-                  : result.edition_confidence === 'medium' ? C.accent : C.text3,
-              }]}>
-                {result.edition_confidence} confidence
-              </Text>
-            </View>
-          </View>
-          {result.edition_evidence?.map((e, i) => (
-            <View key={i} style={s.bulletRow}>
-              <Text style={s.bullet}>·</Text>
-              <Text style={s.bulletText}>{e}</Text>
-            </View>
-          ))}
+          <Text style={s.editionText}>{result.edition_assessment}</Text>
         </View>
-      )}
+      ) : null}
 
-      {/* What to look for */}
-      {result.points_to_check?.length > 0 && (
-        <View style={s.card}>
-          <Text style={s.cardLabel}>Check on the Physical Copy</Text>
-          {result.points_to_check.map((pt, i) => (
-            <View key={i} style={s.checkRow}>
-              <Text style={s.checkNum}>{i + 1}</Text>
-              <Text style={s.checkText}>{pt}</Text>
-            </View>
-          ))}
-        </View>
-      )}
-
-      {/* Signature / inscription */}
-      {hasSig && (
+      {/* Signature */}
+      {hasSig ? (
         <View style={[s.card, s.sigCard]}>
-          <Text style={s.cardLabel}>
-            {result.signature_type === 'signed' ? 'Signed Copy'
-              : result.signature_type === 'inscribed' ? 'Inscribed Copy'
-              : result.signature_type === 'association' ? 'Association Copy'
-              : result.signature_type === 'bookplate' ? 'Bookplate Present'
-              : 'Inscription Detected'}
-          </Text>
-          {result.signature_transcription ? (
-            <Text style={s.sigTranscription}>"{result.signature_transcription}"</Text>
+          <Text style={s.cardLabel}>Signature / Inscription Detected</Text>
+          {result.signature_detail ? (
+            <Text style={s.sigDetail}>"{result.signature_detail}"</Text>
           ) : null}
           <View style={s.sigWarning}>
             <Text style={s.sigWarningIcon}>⚠</Text>
-            <Text style={s.sigWarningText}>{result.signature_auth_note}</Text>
+            <Text style={s.sigWarningText}>
+              Verify authenticity with a specialist before pricing as a signed copy.
+              Gibson cannot authenticate signatures.
+            </Text>
           </View>
         </View>
-      )}
-
-      {/* Author significance */}
-      {(result.author_significance || result.author_awards?.length > 0) && (
-        <View style={s.card}>
-          <Text style={s.cardLabel}>Author Significance</Text>
-          {result.author_significance ? (
-            <Text style={s.authorSig}>{result.author_significance}</Text>
-          ) : null}
-          {result.author_awards?.map((award, i) => (
-            <View key={i} style={s.bulletRow}>
-              <Text style={s.bullet}>◆</Text>
-              <Text style={s.bulletText}>{award}</Text>
-            </View>
-          ))}
-        </View>
-      )}
-
-      {/* Unverified claims — warning style */}
-      {result.unverified_claims?.length > 0 && (
-        <View style={[s.card, s.unverifiedCard]}>
-          <Text style={[s.cardLabel, { color: C.yellow }]}>⚠ Unverified — Confirm Physically</Text>
-          <Text style={s.unverifiedNote}>
-            The following came from Gibson's training knowledge and could not be confirmed via web search.
-            Verify against the physical book before pricing.
-          </Text>
-          {result.unverified_claims.map((claim, i) => (
-            <View key={i} style={s.bulletRow}>
-              <Text style={[s.bullet, { color: C.yellow }]}>!</Text>
-              <Text style={[s.bulletText, { color: C.text2 }]}>{claim}</Text>
-            </View>
-          ))}
-        </View>
-      )}
-
-      {/* Sources */}
-      {result.sources?.length > 0 && (
-        <View style={s.card}>
-          <Text style={s.cardLabel}>Sources</Text>
-          {result.sources.map((src, i) => (
-            <View key={i} style={s.sourceRow}>
-              <View style={s.sourceMain}>
-                <Text style={s.sourceTitle}>{src.title}</Text>
-                <Text style={s.sourceReasoning}>{src.reasoning}</Text>
-              </View>
-              {src.url ? (
-                <TouchableOpacity onPress={() => Linking.openURL(src.url)} style={s.sourceLinkBtn}>
-                  <Text style={s.sourceLinkBtnText}>↗</Text>
-                </TouchableOpacity>
-              ) : null}
-            </View>
-          ))}
-        </View>
-      )}
-
-      {/* Save button */}
-      {stockItemId ? (
-        <TouchableOpacity
-          style={[s.saveBtn, (saving || saved) && s.btnDisabled]}
-          onPress={handleSave}
-          disabled={saving || saved}
-        >
-          {saving
-            ? <ActivityIndicator color={C.bg} />
-            : <Text style={s.saveBtnText}>
-                {saved ? '✓ Saved to Item' : 'Save Findings to Item'}
-              </Text>
-          }
-        </TouchableOpacity>
       ) : null}
 
-      <TouchableOpacity style={s.backBtnBottom} onPress={() => router.back()}>
-        <Text style={s.backBtnBottomText}>← Back to identification</Text>
+      {/* Physical checks */}
+      {result.physical_checks?.length > 0 ? (
+        <View style={s.card}>
+          <Text style={s.cardLabel}>Check on the Physical Copy</Text>
+          {result.physical_checks.map((check, i) => (
+            <View key={i} style={s.checkRow}>
+              <Text style={s.checkNum}>{i + 1}</Text>
+              <Text style={s.checkText}>{check}</Text>
+            </View>
+          ))}
+        </View>
+      ) : null}
+
+      {/* Sources */}
+      {result.sources_used?.length > 0 ? (
+        <View style={s.card}>
+          <Text style={s.cardLabel}>Sources Used</Text>
+          {result.sources_used.map((src, i) => (
+            <Text key={i} style={s.sourceItem}>· {src}</Text>
+          ))}
+        </View>
+      ) : null}
+
+      {/* Stage / token meta — small, bottom */}
+      <Text style={s.meta}>
+        Stage {result.stage_reached} · {result.tokens_used?.toLocaleString()} tokens · {result.elapsed_seconds}s
+      </Text>
+
+      <TouchableOpacity style={s.backBtn} onPress={() => router.back()}>
+        <Text style={s.backBtnText}>← Back to identification</Text>
       </TouchableOpacity>
 
     </ScrollView>
@@ -385,40 +354,57 @@ const s = StyleSheet.create({
   container: { flex: 1, backgroundColor: C.bg },
   content:   { padding: 16, paddingBottom: 48 },
 
-  // Loading / not found screens
   loadingScreen: {
     flex: 1, backgroundColor: C.bg,
     alignItems: 'center', justifyContent: 'center', padding: 32,
   },
   loadingStatus: { color: C.text, fontSize: 15, fontWeight: '600', marginTop: 20 },
-  loadingHint:   { color: C.text3, fontSize: 12, marginTop: 8, textAlign: 'center' },
 
-  notCollectibleIcon:  { fontSize: 48, marginBottom: 16 },
-  notCollectibleTitle: { color: C.text, fontSize: 18, fontWeight: '700', marginBottom: 8 },
-  notCollectibleText:  { color: C.text2, fontSize: 14, textAlign: 'center', lineHeight: 22 },
-  backBtn: { marginTop: 24, padding: 12 },
-  backBtnText: { color: C.accent, fontSize: 14 },
-
-  // Photo request screen
-  photoRequestScreen: {
+  // Trigger screen
+  triggerScreen: {
     flex: 1, backgroundColor: C.bg,
     alignItems: 'center', justifyContent: 'center', padding: 24,
   },
-  photoRequestCard: {
+  triggerCard: {
     backgroundColor: C.card, borderRadius: 16,
     padding: 24, borderWidth: 1, borderColor: C.border,
     alignItems: 'center', width: '100%',
   },
-  photoRequestIcon:   { fontSize: 36, marginBottom: 12 },
-  photoRequestPage:   { color: C.accent, fontSize: 16, fontWeight: '700', marginBottom: 8 },
-  photoRequestReason: { color: C.text2, fontSize: 14, textAlign: 'center', lineHeight: 20, marginBottom: 24 },
-  photoTakeBtn: {
+  triggerIcon:  { fontSize: 40, marginBottom: 12 },
+  triggerTitle: { color: C.text, fontSize: 18, fontWeight: '700', marginBottom: 8 },
+  triggerSub:   { color: C.text3, fontSize: 12, marginBottom: 10, textTransform: 'uppercase', letterSpacing: 0.8 },
+  reasonRow:    { flexDirection: 'row', gap: 8, marginBottom: 6, alignSelf: 'stretch' },
+  reasonDot:    { color: C.accent, fontSize: 16, width: 12, textAlign: 'center' },
+  reasonText:   { flex: 1, color: C.text2, fontSize: 13, lineHeight: 20 },
+  triggerNote:  { color: C.text3, fontSize: 12, lineHeight: 18, textAlign: 'center', marginVertical: 16 },
+  runBtn: {
     backgroundColor: C.accent, padding: 14, borderRadius: 10,
     width: '100%', alignItems: 'center', marginBottom: 10,
   },
-  photoTakeBtnText: { color: C.bg, fontWeight: '700', fontSize: 14 },
-  photoSkipBtn: { padding: 10 },
-  photoSkipBtnText: { color: C.text3, fontSize: 13 },
+  runBtnText:  { color: C.bg, fontWeight: '700', fontSize: 14 },
+  backLink:    { padding: 10 },
+  backLinkText: { color: C.text3, fontSize: 13 },
+
+  // Photo request
+  photoScreen: {
+    flex: 1, backgroundColor: C.bg,
+    alignItems: 'center', justifyContent: 'center', padding: 24,
+  },
+  photoCard: {
+    backgroundColor: C.card, borderRadius: 16,
+    padding: 24, borderWidth: 1, borderColor: C.border,
+    alignItems: 'center', width: '100%',
+  },
+  photoIcon:    { fontSize: 36, marginBottom: 12 },
+  photoTitle:   { color: C.text, fontSize: 16, fontWeight: '700', marginBottom: 8 },
+  photoRequest: { color: C.text2, fontSize: 13, lineHeight: 20, textAlign: 'center', marginBottom: 20 },
+  photoBtn: {
+    backgroundColor: C.accent, padding: 14, borderRadius: 10,
+    width: '100%', alignItems: 'center', marginBottom: 10,
+  },
+  photoBtnText: { color: C.bg, fontWeight: '700', fontSize: 14 },
+  photoSkip:    { padding: 10 },
+  photoSkipText: { color: C.text3, fontSize: 13 },
 
   // Cards
   card: {
@@ -437,83 +423,45 @@ const s = StyleSheet.create({
     padding: 16, marginBottom: 12,
     borderWidth: 1, borderColor: C.border,
   },
-  headerTitle:  { color: C.text, fontSize: 18, fontWeight: '700', lineHeight: 24 },
-  headerAuthor: { color: C.text2, fontSize: 13, marginTop: 4 },
-  scoreRow:     { flexDirection: 'row', marginTop: 12, marginBottom: 8 },
-  scorePill: {
+  headerTitle: { color: C.text, fontSize: 18, fontWeight: '700', lineHeight: 24 },
+  headerSub:   { color: C.text2, fontSize: 13, marginTop: 4 },
+  confRow:     { flexDirection: 'row', gap: 8, marginTop: 12, flexWrap: 'wrap' },
+  confPill: {
     paddingHorizontal: 10, paddingVertical: 5,
     borderRadius: 999, borderWidth: 1,
   },
-  scoreText:    { fontSize: 12, fontWeight: '600' },
-  summaryText:  { color: C.text2, fontSize: 13, lineHeight: 20, marginTop: 4 },
-
-  // Assessed value card — amber gold
-  assessedCard: {
-    backgroundColor: C.accentBg, borderRadius: 12,
-    padding: 16, marginBottom: 12,
-    borderWidth: 1, borderColor: C.accent,
+  confText: { fontSize: 12, fontWeight: '600' },
+  typePill: {
+    paddingHorizontal: 10, paddingVertical: 5,
+    borderRadius: 999, borderWidth: 1,
+    borderColor: C.accent, backgroundColor: C.accentBg,
   },
-  assessedLabel: {
+  typeText: { fontSize: 12, fontWeight: '600', color: C.accent },
+
+  // Action card
+  actionCard: { borderColor: C.accent },
+  actionLabel: {
     color: C.accentDim, fontSize: 10,
     textTransform: 'uppercase', letterSpacing: 1.2, marginBottom: 8,
   },
-  assessedRange: {
-    color: C.text, fontSize: 36, fontWeight: '800', letterSpacing: -0.5,
-  },
-  assessedReasoning: { color: C.text2, fontSize: 12, marginTop: 8, lineHeight: 18 },
-  djRow:  { flexDirection: 'row', gap: 8, marginTop: 12 },
-  djPill: {
-    flex: 1, backgroundColor: C.surface,
-    borderRadius: 8, padding: 10,
-    borderWidth: 1, borderColor: C.accent,
-  },
-  djPillDim: { borderColor: C.border },
-  djPillLabel: { color: C.accent, fontSize: 10, textTransform: 'uppercase', letterSpacing: 0.8 },
-  djPillValue: { color: C.text, fontSize: 15, fontWeight: '700', marginTop: 2 },
-  sourceLink: { color: C.accentDim, fontSize: 11, marginTop: 10 },
+  actionText: { color: C.text, fontSize: 15, lineHeight: 22, fontWeight: '500' },
 
-  // Gibson price card
-  gibsonCard: {
-    backgroundColor: C.surface, borderRadius: 12,
-    padding: 14, marginBottom: 12,
-    borderWidth: 1, borderColor: C.border,
+  // Value card
+  valueCard: { borderColor: C.accent, backgroundColor: C.accentBg },
+  valueLabel: {
+    color: C.accentDim, fontSize: 10,
+    textTransform: 'uppercase', letterSpacing: 1.2, marginBottom: 8,
   },
-  gibsonLabel: {
-    color: C.text3, fontSize: 10,
-    textTransform: 'uppercase', letterSpacing: 1.2, marginBottom: 6,
-  },
-  gibsonNote: { color: C.text3, fontSize: 12, lineHeight: 17 },
+  valueRange:    { color: C.text, fontSize: 36, fontWeight: '800', letterSpacing: -0.5 },
+  baselineText:  { color: C.text3, fontSize: 12, marginTop: 6 },
+  anomalyDetail: { color: C.text2, fontSize: 12, marginTop: 8, lineHeight: 18 },
 
   // Edition
-  editionRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 12 },
-  editionPrinting: { color: C.text, fontSize: 15, fontWeight: '700', flex: 1 },
-  confBadge: {
-    paddingHorizontal: 8, paddingVertical: 4,
-    borderRadius: 6, borderWidth: 1,
-  },
-  confBadgeText: { fontSize: 11, fontWeight: '600' },
-
-  // Bullets
-  bulletRow: { flexDirection: 'row', gap: 8, marginBottom: 6 },
-  bullet:    { color: C.accent, fontSize: 14, width: 12, textAlign: 'center', marginTop: 1 },
-  bulletText: { flex: 1, color: C.text2, fontSize: 13, lineHeight: 20 },
-
-  // Points to check
-  checkRow: { flexDirection: 'row', gap: 10, marginBottom: 10, alignItems: 'flex-start' },
-  checkNum: {
-    width: 22, height: 22, borderRadius: 11,
-    backgroundColor: C.accentBg, borderWidth: 1, borderColor: C.accent,
-    alignItems: 'center', justifyContent: 'center',
-    color: C.accent, fontSize: 11, fontWeight: '700', textAlign: 'center', lineHeight: 22,
-  },
-  checkText: { flex: 1, color: C.text, fontSize: 13, lineHeight: 20 },
+  editionText: { color: C.text2, fontSize: 13, lineHeight: 20 },
 
   // Signature
-  sigCard: { borderColor: C.yellowBg },
-  sigTranscription: {
-    color: C.text, fontSize: 15, fontStyle: 'italic',
-    marginBottom: 12, lineHeight: 22,
-  },
+  sigCard:   { borderColor: C.yellow + '66' },
+  sigDetail: { color: C.text, fontSize: 14, fontStyle: 'italic', marginBottom: 12, lineHeight: 22 },
   sigWarning: {
     flexDirection: 'row', gap: 8,
     backgroundColor: C.yellowBg, borderRadius: 8, padding: 10,
@@ -521,32 +469,21 @@ const s = StyleSheet.create({
   sigWarningIcon: { color: C.yellow, fontSize: 14 },
   sigWarningText: { flex: 1, color: C.text2, fontSize: 12, lineHeight: 18 },
 
-  // Author
-  authorSig: { color: C.text2, fontSize: 13, lineHeight: 20, marginBottom: 8 },
-
-  // Unverified
-  unverifiedCard: { borderColor: C.yellow + '66' },
-  unverifiedNote: { color: C.text2, fontSize: 12, lineHeight: 18, marginBottom: 10 },
+  // Physical checks
+  checkRow: { flexDirection: 'row', gap: 10, marginBottom: 10, alignItems: 'flex-start' },
+  checkNum: {
+    width: 22, height: 22, borderRadius: 11,
+    backgroundColor: C.accentBg, borderWidth: 1, borderColor: C.accent,
+    color: C.accent, fontSize: 11, fontWeight: '700',
+    textAlign: 'center', lineHeight: 22,
+  },
+  checkText: { flex: 1, color: C.text, fontSize: 13, lineHeight: 20 },
 
   // Sources
-  sourceRow: {
-    flexDirection: 'row', alignItems: 'flex-start',
-    paddingVertical: 10, gap: 10,
-    borderBottomWidth: 1, borderBottomColor: C.border,
-  },
-  sourceMain:      { flex: 1 },
-  sourceTitle:     { color: C.text, fontSize: 13, fontWeight: '600' },
-  sourceReasoning: { color: C.text3, fontSize: 11, marginTop: 3, lineHeight: 16 },
-  sourceLinkBtn:   { padding: 4 },
-  sourceLinkBtnText: { color: C.accent, fontSize: 16 },
+  sourceItem: { color: C.text3, fontSize: 12, lineHeight: 20 },
 
-  // Save / back
-  saveBtn: {
-    backgroundColor: C.accent, padding: 16,
-    borderRadius: 12, alignItems: 'center', marginBottom: 10,
-  },
-  saveBtnText:    { color: C.bg, fontWeight: '700', fontSize: 15 },
-  btnDisabled:    { opacity: 0.5 },
-  backBtnBottom:  { alignItems: 'center', padding: 12 },
-  backBtnBottomText: { color: C.text3, fontSize: 13 },
+  // Meta / back
+  meta: { color: C.text3, fontSize: 11, textAlign: 'center', marginTop: 8, marginBottom: 4 },
+  backBtn: { alignItems: 'center', padding: 12 },
+  backBtnText: { color: C.text3, fontSize: 13 },
 });

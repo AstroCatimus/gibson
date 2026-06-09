@@ -110,7 +110,7 @@ async def _merge_editions(keep_id: str, merge_id: str):
         keep_id, merge_id
     )
     await execute(
-        "UPDATE gibson_source_record SET matched_edition_id = $1 WHERE matched_edition_id = $2",
+        "UPDATE gibson_edition_source SET matched_edition_id = $1 WHERE matched_edition_id = $2",
         keep_id, merge_id
     )
     await execute("DELETE FROM gibson_edition_agent WHERE edition_id = $1", merge_id)

@@ -1,6 +1,9 @@
 """
 Gibson API dependencies — request-scoped resources.
-Store context extracted from JWT on every request.
+Store context is derived from the verified JWT claim on every request.
+
+SECURITY: store_id must come from the token, never from a caller-supplied header.
+An unauthenticated header is how a member could read another store's inventory.
 """
 
 from fastapi import Depends, HTTPException, Header
@@ -10,43 +13,60 @@ from jose import jwt, JWTError
 from api.config import settings
 
 
-async def get_store_id(x_store_id: Optional[str] = Header(None)) -> str:
-    """
-    Extract store context from request header.
-    Every Stock Item query MUST include store_id.
-    In production, this comes from the JWT claim.
-    For now, accept it as a header with fallback to DL.
-    """
-    if x_store_id:
-        return x_store_id
-    return settings.store_dl_id
-
-
-async def get_employee_id(x_employee_id: Optional[str] = Header(None)) -> Optional[str]:
-    """Extract employee context from request header."""
-    return x_employee_id
-
-
 async def verify_token(authorization: Optional[str] = Header(None)) -> dict:
     """
-    Verify JWT token and extract claims.
-    Returns decoded payload with store_id and user_id.
-    Skips verification in development when no JWT_SECRET is set.
+    Verify the Supabase JWT and return its claims.
+
+    In development (jwt_secret not set): returns safe default dev claims for
+    Driftless Books. This path is only reachable on localhost.
+
+    In production: the token must be a valid HS256 JWT signed with jwt_secret.
+    store_id is read from user_metadata.store_id (set during onboarding).
     """
     if not settings.jwt_secret:
-        # Development mode — return default claims
+        # Dev mode — no secret configured, safe on localhost only
         return {
-            "user_id": "dev-user",
+            "sub": "dev-user",
             "store_id": settings.store_dl_id,
             "role": "owner",
         }
 
     if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Missing or invalid authorization header")
+        raise HTTPException(status_code=401, detail="Authorization header required")
 
-    token = authorization.replace("Bearer ", "")
+    token = authorization.removeprefix("Bearer ").strip()
     try:
         payload = jwt.decode(token, settings.jwt_secret, algorithms=["HS256"])
         return payload
     except JWTError:
-        raise HTTPException(status_code=401, detail="Invalid token")
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
+
+
+async def get_store_id(claims: dict = Depends(verify_token)) -> str:
+    """
+    Extract store_id from the verified JWT claims.
+
+    Supabase JWTs carry store_id in user_metadata (set at onboarding).
+    Falls back to top-level claim for custom tokens issued by the app.
+    Raises 401 if no store membership is found in the token.
+    """
+    # Supabase JWT: user_metadata.store_id
+    store_id = (
+        claims.get("store_id")
+        or (claims.get("user_metadata") or {}).get("store_id")
+        or (claims.get("app_metadata") or {}).get("store_id")
+    )
+    if not store_id:
+        raise HTTPException(
+            status_code=401,
+            detail="No store membership in token. Complete store onboarding first.",
+        )
+    return store_id
+
+
+async def get_employee_id(claims: dict = Depends(verify_token)) -> Optional[str]:
+    """
+    Extract employee (user) ID from the verified JWT claims.
+    Returns None if not present — callers treat this as anonymous.
+    """
+    return claims.get("sub") or claims.get("user_id")

@@ -13,6 +13,7 @@ import * as DocumentPicker from 'expo-document-picker';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { api } from '../../src/lib/api';
+import { GRADES } from '../../src/lib/grades';
 import { C } from '../../src/lib/theme';
 
 // ─── Tier badge ───────────────────────────────────────────────────
@@ -857,7 +858,7 @@ function QueueView({
 
             <Text style={s.modalLabel}>Condition</Text>
             <View style={s.condRow}>
-              {['VG+', 'VG', 'G+', 'G', 'Fair', 'Poor'].map(c => (
+              {GRADES.map(c => (
                 <TouchableOpacity
                   key={c}
                   style={[s.condChip, updateCondition === c && s.condChipActive]}

@@ -19,7 +19,6 @@ const CARD    = C.card;
 const GREEN   = C.green;
 const YELLOW  = C.yellow;
 const RED     = C.red;
-const GOLD    = C.accent;   // amber gold for deep lookup suggestion
 
 function confColor(pct) {
   return pct >= 85 ? GREEN : pct >= 60 ? YELLOW : RED;
@@ -189,27 +188,6 @@ export default function IdentifyScreen() {
         </View>
       )}
 
-      {/* Deep lookup suggestion — shown when Stage 1 trigger fires */}
-      {result.suggest_deep_lookup && (
-        <View style={s.deepSuggestCard}>
-          <View style={s.deepSuggestHeader}>
-            <Text style={s.deepSuggestIcon}>⚡</Text>
-            <Text style={s.deepSuggestTitle}>This book may be worth more</Text>
-          </View>
-          {result.suggest_reason ? (
-            <Text style={s.deepSuggestReason}>{result.suggest_reason}</Text>
-          ) : null}
-          <View style={s.deepSuggestBtns}>
-            <TouchableOpacity style={s.deepRunBtn} onPress={handleDeepLookup}>
-              <Text style={s.deepRunBtnText}>Run Deep Lookup</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={s.deepSkipBtn} onPress={handleConfirm}>
-              <Text style={s.deepSkipBtnText}>Skip</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      )}
-
       {/* Follow-up request */}
       {result.follow_up_request && (
         <View style={[s.card, s.followUpCard]}>
@@ -224,12 +202,10 @@ export default function IdentifyScreen() {
         </View>
       )}
 
-      {/* Small always-available deep lookup button */}
-      {!result.suggest_deep_lookup && (
-        <TouchableOpacity style={s.deepLookupSmall} onPress={handleDeepLookup}>
-          <Text style={s.deepLookupSmallText}>🔍  Deep lookup</Text>
-        </TouchableOpacity>
-      )}
+      {/* Deep lookup */}
+      <TouchableOpacity style={s.deepLookupSmall} onPress={handleDeepLookup}>
+        <Text style={s.deepLookupSmallText}>🔍  Deep lookup</Text>
+      </TouchableOpacity>
 
       {/* CTA */}
       <TouchableOpacity
@@ -332,30 +308,7 @@ const s = StyleSheet.create({
   },
   followUpBtnText: { color: YELLOW, fontWeight: '700', fontSize: 13 },
 
-  // Deep lookup suggestion card
-  deepSuggestCard: {
-    backgroundColor: C.accentBg,
-    borderWidth: 1, borderColor: C.accent,
-    borderRadius: 12, padding: 16, marginBottom: 12,
-  },
-  deepSuggestHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 6 },
-  deepSuggestIcon: { fontSize: 18 },
-  deepSuggestTitle: { color: C.accent, fontSize: 14, fontWeight: '700', flex: 1 },
-  deepSuggestReason: { color: C.text2, fontSize: 12, marginBottom: 14, lineHeight: 18 },
-  deepSuggestBtns: { flexDirection: 'row', gap: 10 },
-  deepRunBtn: {
-    flex: 1, backgroundColor: C.accent,
-    padding: 11, borderRadius: 9, alignItems: 'center',
-  },
-  deepRunBtnText: { color: C.bg, fontWeight: '700', fontSize: 13 },
-  deepSkipBtn: {
-    paddingHorizontal: 16, padding: 11,
-    borderRadius: 9, borderWidth: 1, borderColor: C.border,
-    alignItems: 'center',
-  },
-  deepSkipBtnText: { color: C.text3, fontSize: 13 },
-
-  // Small always-visible deep lookup link
+  // Deep lookup link
   deepLookupSmall: { alignItems: 'center', paddingVertical: 6, marginBottom: 6 },
   deepLookupSmallText: { color: C.text3, fontSize: 12 },
 

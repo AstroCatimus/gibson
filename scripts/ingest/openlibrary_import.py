@@ -92,7 +92,7 @@ async def import_openlibrary(filepath: str, limit: int = 0):
 
                     await execute(
                         pool,
-                        """INSERT INTO gibson_source_record
+                        """INSERT INTO gibson_edition_source
                            (source, source_id, raw_data, normalized_title, normalized_author, isbn_13, trust_tier)
                            VALUES ('open_library', $1, $2::jsonb, $3, $4, $5, 4)
                            ON CONFLICT DO NOTHING""",

@@ -17,7 +17,7 @@ router = APIRouter()
 @router.get("/queue")
 async def ghost_book_queue(
     store_id: str = Depends(get_store_id),
-    status: str = "UNRESEARCHED",
+    status: str = "QUEUED",
     limit: int = 50,
 ):
     """Ghost Book records awaiting research or review."""
@@ -97,13 +97,128 @@ async def confirm_ghost_book(
     ghost_book_id: UUID,
     work_data: dict,
 ):
-    """Confirm a Ghost Book identification → creates Work + Edition."""
-    await execute(
-        """
-        UPDATE gibson_ghost_book_record
-        SET research_status = 'CONFIRMED', updated_at = now()
-        WHERE ghost_book_id = $1
-        """,
+    """
+    Confirm a Ghost Book identification.
+    Creates Work + Edition from work_data, links the stock item,
+    moves it out of GHOST_BOOK_QUEUE, and marks the record CONFIRMED.
+    All writes in a single transaction.
+    """
+    from api.database import get_transaction
+
+    # Fetch the ghost book record to get the linked stock item
+    gb_row = await fetchrow(
+        "SELECT stock_item_id FROM gibson_ghost_book_record WHERE ghost_book_id = $1",
         str(ghost_book_id),
     )
-    return {"status": "confirmed"}
+    if not gb_row:
+        raise HTTPException(status_code=404, detail="Ghost Book record not found")
+
+    stock_item_id = gb_row["stock_item_id"]
+
+    title     = work_data.get("title") or "Untitled"
+    author    = work_data.get("author")
+    year      = work_data.get("year") or work_data.get("publication_year")
+    isbn      = work_data.get("isbn_13")
+    publisher = work_data.get("publisher")
+    usbn      = work_data.get("usbn")
+
+    async with get_transaction() as conn:
+        # ── Work ───────────────────────────────────────────────────────
+        title_sort = title.lower().lstrip("the ").lstrip("a ").lstrip("an ").strip()
+        work_row = await conn.fetchrow(
+            """
+            INSERT INTO gibson_work (title, title_sort, work_type, confidence)
+            VALUES ($1, $2, 'monograph', 0.70)
+            RETURNING work_id
+            """,
+            title, title_sort,
+        )
+        work_id = str(work_row["work_id"])
+
+        # ── Agent (author) ─────────────────────────────────────────────
+        if author:
+            author = author.strip()
+            parts = author.rsplit(" ", 1)
+            name_sort = f"{parts[-1]}, {parts[0]}" if len(parts) > 1 else author
+            agent_row = await conn.fetchrow(
+                "SELECT agent_id FROM gibson_agent WHERE name_display = $1", author
+            )
+            if not agent_row:
+                agent_row = await conn.fetchrow(
+                    """
+                    INSERT INTO gibson_agent (name_display, name_sort, agent_type)
+                    VALUES ($1, $2, 'person') RETURNING agent_id
+                    """,
+                    author, name_sort,
+                )
+            if agent_row:
+                await conn.execute(
+                    """
+                    INSERT INTO gibson_work_agent (work_id, agent_id, role, role_order)
+                    VALUES ($1, $2, 'author', 1) ON CONFLICT DO NOTHING
+                    """,
+                    work_id, str(agent_row["agent_id"]),
+                )
+
+        # ── Edition ────────────────────────────────────────────────────
+        edition_row = await conn.fetchrow(
+            """
+            INSERT INTO gibson_edition (work_id, isbn_13, usbn, publication_year, confidence)
+            VALUES ($1, $2, $3, $4, 0.70)
+            RETURNING edition_id
+            """,
+            work_id, isbn, usbn, year,
+        )
+        edition_id = str(edition_row["edition_id"])
+
+        # ── Publisher ──────────────────────────────────────────────────
+        if publisher:
+            pub_row = await conn.fetchrow(
+                "SELECT publisher_id FROM gibson_publisher WHERE name_display = $1", publisher
+            )
+            if not pub_row:
+                pub_row = await conn.fetchrow(
+                    """
+                    INSERT INTO gibson_publisher (name_display, name_sort, publisher_type)
+                    VALUES ($1, $2, 'commercial') RETURNING publisher_id
+                    """,
+                    publisher, publisher.lower(),
+                )
+            if pub_row:
+                await conn.execute(
+                    """
+                    INSERT INTO gibson_edition_publisher (edition_id, publisher_id, role)
+                    VALUES ($1, $2, 'publisher') ON CONFLICT DO NOTHING
+                    """,
+                    edition_id, str(pub_row["publisher_id"]),
+                )
+
+        # ── Link stock item to new edition, release from ghost queue ──
+        if stock_item_id:
+            await conn.execute(
+                """
+                UPDATE gibson_stock_item
+                SET edition_id = $1,
+                    status = 'AVAILABLE',
+                    updated_at = now()
+                WHERE stock_item_id = $2
+                """,
+                edition_id, str(stock_item_id),
+            )
+
+        # ── Mark ghost book confirmed ──────────────────────────────────
+        await conn.execute(
+            """
+            UPDATE gibson_ghost_book_record
+            SET research_status = 'CONFIRMED', updated_at = now()
+            WHERE ghost_book_id = $1
+            """,
+            str(ghost_book_id),
+        )
+
+    return {
+        "status": "confirmed",
+        "work_id": work_id,
+        "edition_id": edition_id,
+        "stock_item_id": str(stock_item_id) if stock_item_id else None,
+    }

@@ -2,15 +2,17 @@
 Gibson pricing aggregator.
 Fires all sources in parallel. Labels everything.
 
-Current stack (Month 1 — no API accounts required):
+Current stack:
   Gibson POS    → Realized  → Highest weight (3.0)
-  BookFinder    → Asking    → GATE (replaces Vialibri until stable)
-  BooksRun      → Asking    → Low (post-1990 only, 0.3)
+  BookFinder    → Asking    → GATE (no API key required)
+  BooksRun      → Asking    → Low weight (post-1990 only, 0.3)
   BookScouter   → Trend     → Supplemental (0.2)
   Claude Haiku  → Estimate  → Last resort (labeled: AI ESTIMATE — NO MARKET DATA)
 
+When Vialibri partnership lands: replace BookFinder with a sanctioned Vialibri API client.
+No scraping. No evasion. Identified as Gibson.
+
 Add when ready:
-  Vialibri      → swap back in for BookFinder as gate
   eBay sold     → add fetch_ebay_sold (needs API key)
   eBay active   → add fetch_ebay_active (needs API key)
 """
@@ -63,8 +65,8 @@ async def get_pricing(
                 continue
 
             if name == "bookfinder":
-                result.vialibri = res          # stored in vialibri slot — same gate logic
-                result.vialibri_has_comps = len(res) > 0
+                result.gate = res
+                result.gate_has_comps = len(res) > 0
             elif name == "booksrun":
                 result.booksrun = res
             elif name == "bookscouter":
@@ -73,7 +75,7 @@ async def get_pricing(
                 result.gibson_pos = res
 
     result.total_comps = (
-        len(result.gibson_pos) + len(result.vialibri)
+        len(result.gibson_pos) + len(result.gate)
         + len(result.booksrun) + len(result.bookscouter)
     )
 
@@ -91,7 +93,7 @@ def _calculate_suggestion(result: PricingResult):
     for comp in result.gibson_pos:
         prices.append((comp.amount, 3.0))
 
-    for comp in result.vialibri:   # BookFinder comps in this slot
+    for comp in result.gate:
         prices.append((comp.amount, 1.5))
 
     for comp in result.booksrun:

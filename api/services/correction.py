@@ -32,7 +32,7 @@ async def record_correction(
     if edition_id:
         source_row = await fetchrow(
             """
-            SELECT COUNT(*) as cnt FROM gibson_source_record
+            SELECT COUNT(*) as cnt FROM gibson_edition_source
             WHERE matched_edition_id = $1
               AND normalized_data->>$2 IS NOT NULL
               AND normalized_data->>$2 != $3

@@ -33,8 +33,8 @@ class PricingResult(BaseModel):
     gibson_pos: list[PriceComp] = []
     ebay_sold: list[PriceComp] = []
 
-    # Asking prices
-    vialibri: list[PriceComp] = []
+    # Asking prices — gate slot (currently BookFinder; replace with sanctioned Vialibri API when available)
+    gate: list[PriceComp] = []
     ebay_active: list[PriceComp] = []
 
     # Low-weight / supplemental
@@ -48,7 +48,7 @@ class PricingResult(BaseModel):
     suggested_price: Optional[float] = None
     price_range_low: Optional[float] = None
     price_range_high: Optional[float] = None
-    vialibri_has_comps: bool = False
+    gate_has_comps: bool = False
     total_comps: int = 0
 
 

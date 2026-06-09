@@ -64,7 +64,7 @@ async def main():
         # Delete source records first (FK constraint)
         await execute(
             """
-            DELETE FROM gibson_source_record
+            DELETE FROM gibson_import_receipt
             WHERE stock_item_id IN (
                 SELECT stock_item_id FROM gibson_stock_item WHERE store_id = $1
             )
