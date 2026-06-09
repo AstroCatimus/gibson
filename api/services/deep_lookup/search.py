@@ -53,12 +53,13 @@ EDITION_SIGNALS   = ["first edition", "first printing", "first thus", "points", 
 CONDITION_SIGNALS = ["near fine", "very good", "fine", "dust jacket", " dj "]
 AUCTION_DOMAINS   = ["heritage.com", "ha.com", "swanngalleries.com", "pbagalleries.com",
                      "christies.com", "sothebys.com", "bonhams.com"]
-DEALER_DOMAINS    = ["abebooks.com", "biblio.com", "alibris.com", "vialibri.net",
+DEALER_DOMAINS    = ["biblio.com", "alibris.com", "vialibri.net",
                      "bookfinder.com", "bauman.com", "bromerbooks.com", "raptisrarebooks.com"]
 SIG_DOMAINS       = [".edu", "loc.gov", "wikipedia.org", "britannica.com",
                      "poetryfoundation.org", "thelibrary.org"]
 NOISE_DOMAINS     = ["amazon.com", "goodreads.com", "barnesandnoble.com",
-                     "thriftbooks.com", "ebay.com", "walmart.com", "target.com"]
+                     "thriftbooks.com", "ebay.com", "walmart.com", "target.com",
+                     "abebooks.com"]   # Amazon-owned — forbidden per standing decision
 
 
 def categorize(result: dict) -> str:
@@ -214,10 +215,13 @@ async def run_search(
         elif cat == "SIGNIFICANCE":
             sig_results.append(r)
 
-    # Fetch full pages for top auction results (max 2)
-    for r in fetch_targets:
-        full_text = await fetch_relevant_section(r["link"])
-        if full_text:
-            r["snippet"] = full_text[:400]
+    # Fetch full pages for top auction results (max 2) — concurrently
+    if fetch_targets:
+        full_texts = await asyncio.gather(
+            *[fetch_relevant_section(r["link"]) for r in fetch_targets]
+        )
+        for r, full_text in zip(fetch_targets, full_texts):
+            if full_text:
+                r["snippet"] = full_text[:400]
 
     return format_search_context(title, author, year, price_results, sig_results)

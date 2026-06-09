@@ -4,10 +4,16 @@ import anthropic
 from api.config import settings
 from api.services.deep_lookup.models import DeepLookupResult
 
+# Max photos passed to Sonnet. Cover + title page + copyright page + colophon
+# is enough for any real assessment. Beyond that you're paying for noise.
+MAX_PHOTOS = 4
 
-ASSESSMENT_PROMPT = """You are a rare book specialist assessing a physical copy for anomalous value.
+# Static system prompt — Sonnet sees this on every assessment call.
+# Marked for prompt caching: the instructions never change, only the
+# search context and photos do. Cache TTL is 5 minutes.
+ASSESSMENT_SYSTEM = """You are a rare book specialist assessing a physical copy for anomalous value.
 
-The dealer has photographed this copy. Search results and market data are above the photos.
+The dealer has photographed this copy. Search results and market data are in the user message above the photos.
 
 Assess IN ORDER. Stop and flag immediately if you find something significant:
 
@@ -68,17 +74,21 @@ async def run_assessment(
 ) -> DeepLookupResult:
     start = time.monotonic()
 
-    # Build content: search context first, then photos, then prompt
-    content = []
+    # Cap photos — cover + title page + copyright page + colophon is sufficient
+    if len(photos) > MAX_PHOTOS:
+        photos = photos[:MAX_PHOTOS]
 
-    content.append({
-        "type": "text",
-        "text": search_context,
-    })
+    # User message: search context first, then photos
+    # Context before images so Sonnet reads the data before interpreting the photos
+    user_content = [
+        {
+            "type": "text",
+            "text": search_context,
+        }
+    ]
 
-    # All photos as base64 image blocks
     for photo_b64 in photos:
-        content.append({
+        user_content.append({
             "type": "image",
             "source": {
                 "type": "base64",
@@ -87,17 +97,19 @@ async def run_assessment(
             },
         })
 
-    content.append({
-        "type": "text",
-        "text": ASSESSMENT_PROMPT,
-    })
-
     client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
 
     response = await client.messages.create(
-        model=settings.anthropic_research_model,
+        model=settings.anthropic_deep_lookup_model,   # Sonnet — Haiku lacks rare book knowledge
         max_tokens=1000,
-        messages=[{"role": "user", "content": content}],
+        system=[
+            {
+                "type": "text",
+                "text": ASSESSMENT_SYSTEM,
+                "cache_control": {"type": "ephemeral"},  # static prompt — cache it
+            }
+        ],
+        messages=[{"role": "user", "content": user_content}],
     )
 
     text = response.content[0].text.strip()

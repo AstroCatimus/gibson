@@ -135,6 +135,31 @@ export const api = {
   removeItemImage: (id, url) =>
     request('DELETE', `/api/inventory/${id}/images`, { url }),
 
+  // ── Listings / Description ──────────────────────────────────
+  /**
+   * Generate a two-zone listing description.
+   * platform: 'ebay' | 'amazon' | 'biblio'
+   * deepLookupResult: optional — pass the result from deepLookupRun if available.
+   * Dealer MUST review narrative zone before posting.
+   */
+  buildDescription: (stockItemId, platform, deepLookupResult = null) =>
+    request('POST', `/api/listings/${stockItemId}/description`, {
+      platform,
+      deep_lookup_result: deepLookupResult,
+    }),
+
+  getListings: (stockItemId) =>
+    request('GET', `/api/listings/${stockItemId}`),
+
+  listItem: (stockItemId, platforms) =>
+    request('POST', `/api/listings/${stockItemId}/list`, { platforms }),
+
+  delistItem: (stockItemId, platforms) =>
+    request('POST', `/api/listings/${stockItemId}/delist`, { platforms }),
+
+  updateListingPrice: (stockItemId, price) =>
+    request('PATCH', `/api/listings/${stockItemId}/price`, { price }),
+
   // ── POS ─────────────────────────────────────────────────────
   createSale: (items, paymentMethod) =>
     request('POST', '/api/pos/sale', { items, payment_method: paymentMethod }),

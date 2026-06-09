@@ -7,22 +7,23 @@ async def triage_collectibility(research: dict) -> tuple[bool, str]:
     Returns (proceed: bool, reason: str)
     If proceed is False, reason is shown to dealer and pipeline stops.
     """
-    title      = research["title"]["value"]
-    author     = research["author"]["value"]
-    publisher  = research["publisher"]["value"]
-    year       = research["year"]["value"]
-    isbn       = research["isbn_13"]["value"]
-    comp_count = research["pricing"]["comp_count"]
-    price      = research["pricing"]["suggested_price"]
-    edition    = research["edition_statement"]["value"]
-    subjects   = research["subjects"]["value"]
+    title      = (research.get("title")           or {}).get("value") or "Unknown"
+    author     = (research.get("author")          or {}).get("value") or "Unknown"
+    publisher  = (research.get("publisher")       or {}).get("value") or "unknown"
+    year       = (research.get("year")            or {}).get("value")
+    isbn       = (research.get("isbn_13")         or {}).get("value") or ""
+    edition    = (research.get("edition_statement") or {}).get("value") or ""
+    subjects   = (research.get("subjects")        or {}).get("value") or []
+    pricing    = research.get("pricing")          or {}
+    comp_count = pricing.get("comp_count") or 0
+    price      = pricing.get("suggested_price")
 
     prompt = f"""You are a rare book specialist. Based only on bibliographic metadata,
 assess whether this book is likely to have collectible value beyond a standard reading copy.
 
 Title: {title}
 Author: {author}
-Publisher: {publisher or "unknown"}
+Publisher: {publisher}
 Year: {year or "unknown"}
 ISBN: {isbn or "none — pre-ISBN era"}
 Edition statement: {edition or "none recorded"}
@@ -42,7 +43,7 @@ than an unnecessary lookup."""
     client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
 
     response = await client.messages.create(
-        model=settings.anthropic_research_model,
+        model=settings.anthropic_research_model,   # Haiku — triage is cheap by design
         max_tokens=100,
         messages=[{"role": "user", "content": prompt}],
     )

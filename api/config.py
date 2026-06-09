@@ -25,6 +25,8 @@ class Settings(BaseSettings):
     anthropic_vision_escalation_model: str = "claude-sonnet-4-6"
     anthropic_synthesis_model: str = "claude-haiku-4-5-20251001"
     anthropic_research_model: str = "claude-haiku-4-5-20251001"  # escalate to sonnet for hard cases
+    # Deep lookup assessment uses Sonnet — needs genuine rare book knowledge
+    anthropic_deep_lookup_model: str = "claude-sonnet-4-6"
     # Confidence threshold below which vision escalates from Haiku → Sonnet
     vision_escalation_threshold: float = 0.60
 

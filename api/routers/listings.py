@@ -260,6 +260,39 @@ async def set_ebay_policies(
 
 # ── Listing lifecycle ─────────────────────────────────────────────────────────
 
+@router.post("/{stock_item_id}/description")
+async def generate_description(
+    stock_item_id: str,
+    payload: dict,
+    store_id: str = Depends(get_store_id),
+):
+    """
+    Generate a two-zone listing description for a stock item.
+
+    Body:
+      platform          — 'ebay' | 'amazon' | 'biblio'
+      deep_lookup_result — optional DeepLookupResult dict (from /deep-lookup/run)
+
+    Returns:
+      verified_facts    — template-built facts block (condition, jacket, signed, edition)
+      narrative         — Haiku-suggested prose (dealer MUST review before posting)
+      full_description  — both zones joined
+      character_count   — length of full_description
+      within_limit      — whether it fits the platform character cap
+    """
+    from api.services.description_builder import build_description
+
+    platform = payload.get("platform", "ebay").lower()
+    if platform not in ("ebay", "amazon", "biblio"):
+        raise HTTPException(status_code=400, detail="platform must be ebay, amazon, or biblio")
+
+    deep_lookup = payload.get("deep_lookup_result")
+
+    item = await _get_enriched_item(stock_item_id, store_id)
+    result = await build_description(item, platform, deep_lookup)
+    return result
+
+
 @router.get("/{stock_item_id}")
 async def get_listings(
     stock_item_id: str,
